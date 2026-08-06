@@ -15,6 +15,7 @@ from .search_results_window import SearchResultsWindow
 from .search_result_store import SearchResultStore
 from .openai_settings_window import OpenAISettingsWindow
 from .help_window import HelpWindow
+from .local_inspection_window import LocalInspectionWindow
 
 
 class PetWindow(QWidget):
@@ -37,6 +38,7 @@ class PetWindow(QWidget):
         self.search_results_window = None
         self.openai_settings_window = None
         self.help_window = None
+        self.local_inspection_window = None
         self.tray_icon = None; self.tray_menu = None
         self.input_bubble.search_completed.connect(self._on_search_completed)
         self.input_bubble.api_settings_requested.connect(self.open_openai_settings)
@@ -132,6 +134,7 @@ class PetWindow(QWidget):
         self.tray_menu.addSeparator()
         self.tray_menu.addAction("OpenAI API 設定", self.open_openai_settings)
         self.tray_menu.addAction("ファイル検索設定", self.open_file_search_settings)
+        self.tray_menu.addAction("PC調査情報", self.show_local_inspection)
         self.tray_menu.addAction("会話履歴", self.input_bubble.show_history)
         self.tray_menu.addAction("使い方", self.show_help)
         self.tray_menu.addSeparator(); self.tray_menu.addAction("終了", self.quit_application)
@@ -206,6 +209,7 @@ class PetWindow(QWidget):
         menu = QMenu(self)
         menu.addAction('OpenAI API 設定', self.open_openai_settings)
         menu.addAction('ファイル検索設定', self.open_file_search_settings)
+        menu.addAction('PC調査情報', self.show_local_inspection)
         recent = menu.addAction('最近の検索結果', self.show_recent_search)
         recent.setEnabled(self.search_store.latest() is not None)
         cancel = menu.addAction('処理をキャンセル', self.input_bubble.cancel_current_request)
@@ -230,6 +234,9 @@ class PetWindow(QWidget):
     def show_help(self):
         if self.help_window is None: self.help_window = HelpWindow(self)
         self.help_window.show(); self.help_window.raise_(); self.help_window.activateWindow()
+    def show_local_inspection(self):
+        if self.local_inspection_window is None: self.local_inspection_window = LocalInspectionWindow(self)
+        self.local_inspection_window.show(); self.local_inspection_window.raise_(); self.local_inspection_window.activateWindow()
     def show_recent_search(self):
         session = self.search_store.latest()
         if session:
@@ -248,6 +255,7 @@ class PetWindow(QWidget):
         self.input_bubble.close()
         if self.openai_settings_window is not None: self.openai_settings_window.shutdown()
         if self.help_window is not None: self.help_window.close()
+        if self.local_inspection_window is not None: self.local_inspection_window.close()
         if self.tray_icon is not None: self.tray_icon.hide()
         save_position(self.position_path, self.pos()); super().closeEvent(event)
 
