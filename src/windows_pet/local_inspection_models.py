@@ -67,6 +67,7 @@ class AppCandidate:
     executable_name: str = ""
     executable_path: str = ""
     executable_exists: bool | None = None
+    install_location: str = ""
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ class InspectionSnapshot:
     app_paths: list[AppCandidate] = field(default_factory=list)
     start_menu: list[AppCandidate] = field(default_factory=list)
     installed_apps: list[AppCandidate] = field(default_factory=list)
+    path_candidates: list[AppCandidate] = field(default_factory=list)
     partial_errors: list[PartialError] = field(default_factory=list)
     searched_candidates: list[AppCandidate] = field(default_factory=list)
     inspected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

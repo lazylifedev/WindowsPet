@@ -8,7 +8,8 @@ import subprocess
 import sys
 import unicodedata
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable
+from .cancellation import CancellationToken
 
 from .local_inspection_models import (AppCandidate, InspectionErrorCode, InspectionSnapshot,
     PartialError, PathInspection, SystemInfo, WingetStatus)
@@ -19,20 +20,22 @@ def _norm(value: str) -> str:
 
 
 class LocalInspectionService:
-    def __init__(self, env: dict[str, str] | None = None, exists: Callable[[str], bool] | None = None,
-                 now: Callable[[], object] | None = None):
+    def __init__(self, env: dict[str, str] | None = None, exists: Callable[[str], bool] | None = None):
         self.env = env if env is not None else dict(os.environ)
         self.exists = exists or os.path.isdir
 
-    def inspect(self) -> InspectionSnapshot:
+    def inspect(self, token: CancellationToken | None = None) -> InspectionSnapshot:
+        token = token or CancellationToken()
         errors: list[PartialError] = []
         system = self._system_info()
-        path = self._path_info()
-        app_paths = self._registry_apps("app_paths", errors)
-        installed = self._registry_apps("installed_apps", errors)
-        start = self._start_menu(errors)
-        winget = self._winget(errors)
-        return InspectionSnapshot(system, path, winget, app_paths, start, installed, partial_errors=errors)
+        path = self._path_info(token)
+        app_paths = self._registry_apps("app_paths", errors, token)
+        installed = self._registry_apps("installed_apps", errors, token)
+        start = self._start_menu(errors, token)
+        path_candidates = self._path_candidates(token)
+        winget = self._winget(errors, token)
+        return InspectionSnapshot(system, path, winget, app_paths, start, installed,
+                                   partial_errors=errors, path_candidates=path_candidates)
 
     def _system_info(self) -> SystemInfo:
         is_admin = False
@@ -42,27 +45,31 @@ class LocalInspectionService:
         return SystemInfo(platform.system(), platform.release(), platform.version(), platform.machine(),
                           self.env.get("COMPUTERNAME", ""), self.env.get("USERNAME", ""), is_admin, platform.architecture()[0])
 
-    def _path_info(self) -> PathInspection:
+    def _path_info(self, token=None) -> PathInspection:
         unique: list[str] = []; seen: set[str] = set()
         for raw in self.env.get("PATH", "").split(os.pathsep):
+            if token and token.is_cancelled: break
             item = _norm(raw)
             key = os.path.normcase(os.path.normpath(item)) if item else ""
             if item and key not in seen: seen.add(key); unique.append(item)
         existing = sum(self.exists(item) for item in unique)
         return PathInspection(len(unique), existing, len(unique) - existing, tuple(unique))
 
-    def _registry_apps(self, area: str, errors: list[PartialError]) -> list[AppCandidate]:
+    def _registry_apps(self, area: str, errors: list[PartialError], token=None) -> list[AppCandidate]:
         if sys.platform != "win32": return []
         try:
             import winreg
-            roots = [(winreg.HKEY_CURRENT_USER, "HKCU"), (winreg.HKEY_LOCAL_MACHINE, "HKLM")]
+            roots = [(winreg.HKEY_CURRENT_USER, "hkcu", 0), (winreg.HKEY_LOCAL_MACHINE, "hklm_64", winreg.KEY_WOW64_64KEY), (winreg.HKEY_LOCAL_MACHINE, "hklm_32", winreg.KEY_WOW64_32KEY)]
             if area == "installed_apps": sub = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
             else: sub = r"Software\Microsoft\Windows\CurrentVersion\App Paths"
             results: list[AppCandidate] = []
-            for root, source in roots:
+            for root, view, flag in roots:
+                if token and token.is_cancelled: break
+                source = f"{area}_{view}"
                 try:
-                    with winreg.OpenKey(root, sub) as key:
+                    with winreg.OpenKey(root, sub, 0, winreg.KEY_READ | flag) as key:
                         for i in range(winreg.QueryInfoKey(key)[0]):
+                            if token and token.is_cancelled: break
                             name = winreg.EnumKey(key, i)
                             with winreg.OpenKey(key, name) as child:
                                 display = winreg.QueryValueEx(child, "DisplayName")[0] if area == "installed_apps" else name
@@ -71,28 +78,34 @@ class LocalInspectionService:
                                     try: return str(winreg.QueryValueEx(child, n)[0])
                                     except (OSError, TypeError): return ""
                                 exe = val("") if area == "app_paths" else ""
-                                results.append(AppCandidate(display.strip(), val("DisplayVersion"), val("Publisher"), source, name, exe, bool(exe) and Path(exe).exists()))
+                                install = val("InstallLocation") if area == "installed_apps" else ""
+                                results.append(AppCandidate(display.strip(), val("DisplayVersion"), val("Publisher"), source, name, exe, bool(exe) and Path(exe).exists(), install))
                 except FileNotFoundError: continue
-                except PermissionError: errors.append(PartialError(area, InspectionErrorCode.ACCESS_DENIED))
+                except PermissionError: errors.append(PartialError(source, InspectionErrorCode.ACCESS_DENIED))
             return results
         except (ImportError, OSError):
             errors.append(PartialError(area, InspectionErrorCode.UNAVAILABLE)); return []
 
-    def _start_menu(self, errors: list[PartialError]) -> list[AppCandidate]:
-        folders = [self.env.get("APPDATA", "") + r"\Microsoft\Windows\Start Menu", self.env.get("PROGRAMDATA", "") + r"\Microsoft\Windows\Start Menu"]
+    def _start_menu(self, errors: list[PartialError], token=None) -> list[AppCandidate]:
+        folders = [Path(value) / "Microsoft/Windows/Start Menu" for value in (self.env.get("APPDATA"), self.env.get("PROGRAMDATA")) if value and Path(value).is_dir()]
         found: list[AppCandidate] = []
         for folder in folders:
-            if not folder: continue
+            if token and token.is_cancelled: break
             try:
                 for path in Path(folder).rglob("*"):
+                    if token and token.is_cancelled: break
                     if path.is_symlink() or path.suffix.lower() not in (".lnk", ".url"): continue
                     found.append(AppCandidate(path.stem, source="start_menu", executable_name=path.name))
             except (OSError, PermissionError): errors.append(PartialError("start_menu", InspectionErrorCode.ACCESS_DENIED))
         return found
 
-    def _winget(self, errors: list[PartialError]) -> WingetStatus:
+    def _path_candidates(self, token=None) -> list[AppCandidate]:
+        return []
+
+    def _winget(self, errors: list[PartialError], token=None) -> WingetStatus:
         executable = shutil.which("winget")
         if not executable: return WingetStatus(False, error=InspectionErrorCode.NOT_FOUND)
+        if token and token.is_cancelled: return WingetStatus(False, error=InspectionErrorCode.CANCELLED)
         try:
             result = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=5, shell=False,
                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), check=False)
@@ -101,12 +114,22 @@ class LocalInspectionService:
         except subprocess.TimeoutExpired: return WingetStatus(False, error=InspectionErrorCode.TIMEOUT)
         except OSError: return WingetStatus(False, error=InspectionErrorCode.UNAVAILABLE)
 
+    def _path_candidates(self, token=None) -> list[AppCandidate]:
+        """Return safe executable-name candidates without executing anything."""
+        if token and token.is_cancelled:
+            return []
+        suffixes = self.env.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(";")
+        return [AppCandidate("", source="path", executable_name=suffix.lower()) for suffix in suffixes
+                if suffix.strip().lower() in (".com", ".exe", ".bat", ".cmd")]
+
     @staticmethod
     def search(snapshot: InspectionSnapshot, query: str, limit: int = 25) -> list[AppCandidate]:
         q = _norm(query).casefold()
         if not q or limit <= 0: return []
         unique: dict[tuple[str, str, str], AppCandidate] = {}
-        for candidate in snapshot.app_paths + snapshot.start_menu + snapshot.installed_apps:
+        for candidate in snapshot.app_paths + snapshot.start_menu + snapshot.installed_apps + snapshot.path_candidates:
+            if not candidate.display_name:
+                continue
             key = (_norm(candidate.display_name).casefold(), candidate.source, candidate.executable_name.casefold())
             unique.setdefault(key, candidate)
         ranked = []

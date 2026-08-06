@@ -3,6 +3,9 @@ from PySide6.QtWidgets import QDialog, QDialogButtonBox, QPlainTextEdit, QVBoxLa
 
 HELP_TEXT = """WindowsPet の使い方
 
+PC調査情報
+キャラクターまたは通知領域アイコンを右クリックして開きます。OS、PATH、App Paths、スタートメニュー、インストール済みアプリ、wingetの状態を読み取り専用で確認します。アプリの起動、変更、インストールは行わず、調査結果をOpenAI APIへ自動送信しません。
+
 ■ キャラクターの操作
 
 左クリック
