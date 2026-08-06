@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect, QThread, Qt, Signal, QTimer
+from PySide6.QtCore import QEvent, QPoint, QRect, QThread, Qt, Signal, QTimer
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QDialog, QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
     QLabel, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget, QApplication)
@@ -137,12 +137,14 @@ class InputBubble(BubbleFrame):
         self.pointer_entered.emit(); super().enterEvent(event)
     def leaveEvent(self, event):
         self.pointer_left.emit(); super().leaveEvent(event)
-    def eventFilter(self, watched, event):
-        if watched is self.input and event.type() == event.FocusIn:
-            self.focus_state_changed.emit(True)
-        elif watched is self.input and event.type() == event.FocusOut:
-            self.focus_state_changed.emit(False)
-        return super().eventFilter(watched, event)
+    def eventFilter(self, watched, qt_event):
+        event_type = qt_event.type()
+        if watched is self.input:
+            if event_type == QEvent.Type.FocusIn:
+                self.focus_state_changed.emit(True)
+            elif event_type == QEvent.Type.FocusOut:
+                self.focus_state_changed.emit(False)
+        return super().eventFilter(watched, qt_event)
     @property
     def pending(self): return self._pending
     def show_history(self): self.history_window=HistoryWindow(self.conversation); self.history_window.show()

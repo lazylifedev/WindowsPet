@@ -2,9 +2,10 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QEnterEvent, QFocusEvent, QKeyEvent, QPaintEvent
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtCore import QPointF
+from PySide6.QtWidgets import QWidget
 
 from windows_pet.ai_client import AIClient, AIClientError, _error
 from windows_pet.chat_bubble import ChatBubble, HistoryWindow, MessageEdit, chat_position, response_position
@@ -86,6 +87,22 @@ def test_input_height_contract_and_reset(qapp):
     assert grown > 48 and chat.input.height() <= 130
     chat.input.clear(); qapp.processEvents(); assert 48 <= chat.input.height() <= 50
     chat.close()
+
+def test_input_event_filter_handles_focus_and_non_focus_events(qapp):
+    chat = make_chat(qapp)
+    states = []
+    chat.focus_state_changed.connect(states.append)
+    other = QWidget()
+    for event in (QFocusEvent(QEvent.Type.FocusIn), QFocusEvent(QEvent.Type.FocusOut),
+                  QPaintEvent(chat.input.rect()), QMouseEvent(QMouseEvent.Type.MouseMove,
+                  QPointF(1, 1), Qt.NoButton, Qt.NoButton, Qt.NoModifier),
+                  QEnterEvent(QPointF(1, 1), QPointF(1, 1), QPointF(1, 1)),
+                  QEvent(QEvent.Type.Leave)):
+        assert chat.eventFilter(chat.input, event) is False
+    assert states == [True, False]
+    chat.eventFilter(other, QFocusEvent(QEvent.Type.FocusIn))
+    assert states == [True, False]
+    other.deleteLater(); chat.close()
 
 def test_response_empty_and_simultaneous_bubbles_are_safe(qapp):
     chat = make_chat(qapp)
