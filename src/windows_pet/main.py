@@ -94,7 +94,7 @@ class PetWindow(QWidget):
     def contextMenuEvent(self, event: QContextMenuEvent):
         menu = QMenu(self)
         for text, name in (("Play wave", "wave"), ("Play thinking", "thinking"), ("Play sleep", "sleep")): menu.addAction(text, lambda n=name: self.play(n))
-        menu.addSeparator(); menu.addAction("チャットを開く", self.open_chat); menu.addAction("チャットを閉じる", self.close_chat); menu.addAction("Reset position", self.reset_position); menu.addAction("Quit", QApplication.instance().quit); menu.exec(event.globalPos())
+        menu.addSeparator(); menu.addAction("チャットを開く", self.open_chat); menu.addAction("チャットを閉じる", self.close_chat); menu.addAction("Conversation history", self.chat.show_history); menu.addAction("Reset position", self.reset_position); menu.addAction("Quit", QApplication.instance().quit); menu.exec(event.globalPos())
     def reset_position(self): self.move(100, 100); self._activity()
     def closeEvent(self, event): self.chat.close(); save_position(self.position_path, self.pos()); super().closeEvent(event)
 

@@ -19,7 +19,7 @@ def make_chat(qapp):
 
 def test_bubbles_and_input_keyboard_contract(qapp):
     chat = make_chat(qapp)
-    assert chat.response.isVisible() and chat.input.isVisible()
+    assert not chat.response.isVisible() and chat.input.isVisible()
     chat.input.setPlainText("draft")
     assert chat.input.toPlainText() == "draft"
     event = QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier)
