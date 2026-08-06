@@ -124,7 +124,7 @@ class InputBubble(BubbleFrame):
     draft_state_changed = Signal(bool)
     closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict)
     def __init__(self, pet, worker_factory=AIWorker):
-        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self._pending=False; self._search_in_progress=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False
+        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self._pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.card=QFrame(self); self.card.setStyleSheet('QFrame{background:#20242b;border:0;}')
         # A layered top-level window must never receive an effect whose expanded
@@ -179,7 +179,7 @@ class InputBubble(BubbleFrame):
         if self._pending:return False
         text=self.input.toPlainText().strip()
         if not text:return False
-        self._reply_text=''
+        self._reply_text=''; self._search_status_active=False
         self.input.clear(); self.conversation.add_user(text); self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking'); self.response_bubble.setText('考え中…'); self._position_response(); self.response_bubble.show()
         self._thread=QThread(self); self._worker=self._worker_factory(self.conversation.messages()); self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.search_started.connect(self._on_search_started); self._worker.search_completed.connect(self._on_search_completed)
@@ -201,10 +201,29 @@ class InputBubble(BubbleFrame):
         position.setY(min(max(position.y(), area.top()), area.bottom() - r.height() + 1))
         r.set_tail_x(pet_rect.center().x() - position.x())
         r.move(position)
-    def _on_search_started(self): self._search_in_progress=True; self.search_started.emit()
-    def _on_search_completed(self, result): self._search_in_progress=False; self.search_completed.emit(result)
-    def _on_delta(self,text): self._reply_text+=text; self.response.setText(self._reply_text); self.response_bubble.setText(self._reply_text); self._position_response()
+    def _show_response_status(self, text: str) -> None:
+        self.response.setText(text)
+        self.response_bubble.setText(text)
+        self._position_response()
+        if self._pending:
+            self.response_bubble.show()
+
+    def _on_search_started(self):
+        self._search_in_progress=True; self._search_status_active=True
+        self._show_response_status('ファイルを検索しています…')
+        self.search_started.emit()
+
+    def _on_search_completed(self, result):
+        self._search_in_progress=False
+        self._show_response_status('検索結果を整理しています…')
+        self.search_completed.emit(result)
+
+    def _on_delta(self,text):
+        if self._search_status_active:
+            self._reply_text=''; self._search_status_active=False
+        self._reply_text+=text; self.response.setText(self._reply_text); self.response_bubble.setText(self._reply_text); self._position_response()
     def _on_finished(self,text):
+        self._search_status_active=False
         self.response.setText(text); self.response_bubble.setText(text); self._position_response(); self.conversation.add_assistant(text)
         if not text.strip(): self.response_bubble.hide()
         self._complete()

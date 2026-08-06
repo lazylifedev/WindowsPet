@@ -89,6 +89,29 @@ def test_search_state_only_enables_search_cancel(qapp):
     chat._on_finished("done"); assert chat.send_button.isEnabled()
     close_chat(chat, qapp)
 
+def test_search_progress_replaces_status_and_keeps_only_final_reply(qapp):
+    chat = make_chat(qapp)
+    chat._pending = True
+    chat._on_search_started()
+    assert chat.search_in_progress
+    assert chat.response.text() == "ファイルを検索しています…"
+    chat._on_search_completed({"count": 3})
+    assert not chat.search_in_progress
+    assert chat.response.text() == "検索結果を整理しています…"
+    chat._on_delta("3件見つかりました。")
+    assert chat.response.text() == "3件見つかりました。"
+    assert chat._reply_text == "3件見つかりました。"
+    chat._on_finished("3件見つかりました。")
+    assert chat.conversation.messages()[-1]["content"] == "3件見つかりました。"
+    close_chat(chat, qapp)
+
+def test_normal_chat_does_not_show_search_progress(qapp):
+    chat = make_chat(qapp)
+    chat._pending = True
+    chat._on_delta("通常の回答")
+    assert chat.response.text() == "通常の回答"
+    close_chat(chat, qapp)
+
 def test_failed_request_resets_search_state_and_input(qapp):
     chat = make_chat(qapp); chat._on_search_started(); assert chat.search_in_progress
     chat._on_failed("network", "接続できませんでした")
