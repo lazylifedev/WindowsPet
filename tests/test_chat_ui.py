@@ -356,6 +356,26 @@ def test_cancel_current_request_is_single_shot_and_preserves_history(qapp):
     chat._worker = None
     close_chat(chat, qapp)
 
+def test_missing_key_preserves_input_and_requests_settings(qapp, monkeypatch):
+    chat = make_chat(qapp); requested = []; chat.api_settings_requested.connect(lambda: requested.append(True))
+    monkeypatch.setattr('windows_pet.chat_bubble.is_api_key_configured', lambda: False)
+    chat.input.setPlainText('質問A')
+    assert chat.send_message() is False
+    assert chat.input.toPlainText() == '質問A' and not chat.conversation.messages()
+    assert chat._last_error_kind == 'missing_key' and requested == [True]
+    assert chat._thread is None and chat._worker is None
+    close_chat(chat, qapp)
+
+def test_configuration_error_requests_settings_but_network_does_not(qapp):
+    chat = make_chat(qapp); requested = []; chat.api_settings_requested.connect(lambda: requested.append(True))
+    chat._active_user_text = '質問A'; chat.conversation.add_user('質問A'); chat._pending = True
+    chat._on_failed('auth', '安全な認証エラー')
+    assert chat._last_error_kind == 'auth' and chat._retry_text == '質問A'
+    qapp.processEvents(); assert requested == [True]
+    requested.clear(); chat._active_user_text = '質問B'; chat.conversation.add_user('質問B'); chat._pending = True
+    chat._on_failed('network', '安全なネットワークエラー'); qapp.processEvents(); assert requested == []
+    close_chat(chat, qapp)
+
 
 def test_unpin_schedules_hide_and_repin_invalidates_old_timer(monkeypatch, qapp):
     timers = []

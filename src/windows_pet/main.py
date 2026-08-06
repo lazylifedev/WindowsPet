@@ -36,6 +36,7 @@ class PetWindow(QWidget):
         self.search_results_window = None
         self.openai_settings_window = None
         self.input_bubble.search_completed.connect(self._on_search_completed)
+        self.input_bubble.api_settings_requested.connect(self.open_openai_settings)
         self._pet_hovered = False; self._input_hovered = False; self._input_has_focus = False
         self._draft_exists = False; self._api_request_in_progress = False
         self._input_hide_timer = QTimer(self); self._input_hide_timer.setSingleShot(True); self._input_hide_timer.timeout.connect(self._hide_input_if_allowed)

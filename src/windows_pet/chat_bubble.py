@@ -7,11 +7,13 @@ from PySide6.QtWidgets import (QDialog, QFrame, QGraphicsDropShadowEffect, QHBox
 
 from .ai_worker import AIWorker
 from .conversation import Conversation
+from .openai_credentials import is_api_key_configured
 
 MIN_INPUT_HEIGHT, MAX_INPUT_HEIGHT = 52, 140
 TAIL_WIDTH, TAIL_HEIGHT = 14, 18
 SHADOW_BLUR, SHADOW_OFFSET_Y = 12, 3
 RESPONSE_GAP = 3
+CONFIGURATION_ERROR_KINDS = {"missing_key", "auth", "permission", "model"}
 
 def chat_position(pet_rect: QRect, available: QRect, size=(280, MIN_INPUT_HEIGHT)) -> QPoint:
     width, height = size
@@ -134,6 +136,10 @@ class ResponseBubble(BubbleFrame):
     def _build_context_menu(self):
         menu = QMenu(self)
         parent = self.parent()
+        if (getattr(parent, '_last_error_kind', None) in CONFIGURATION_ERROR_KINDS
+                and not parent.pending and not getattr(parent, 'cancel_requested', False)):
+            settings = menu.addAction('OpenAI API設定を開く')
+            settings.triggered.connect(parent.request_api_settings)
         if (getattr(parent, '_retry_text', None) and not parent.pending
                 and not (parent._thread is not None and parent._thread.isRunning())):
             retry_action = menu.addAction('再試行')
@@ -235,9 +241,9 @@ class InputBubble(BubbleFrame):
     pointer_left = Signal()
     focus_state_changed = Signal(bool)
     draft_state_changed = Signal(bool)
-    closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict)
+    closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict); api_settings_requested=Signal()
     def __init__(self, pet, worker_factory=AIWorker):
-        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self._pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False; self._active_user_text=None; self._retry_text=None
+        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self._pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False; self._active_user_text=None; self._retry_text=None; self._last_error_kind=None
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.card=QFrame(self); self.card.setStyleSheet('QFrame{background:#20242b;border:0;}')
         # A layered top-level window must never receive an effect whose expanded
@@ -270,6 +276,7 @@ class InputBubble(BubbleFrame):
     def pending(self): return self._pending
     @property
     def search_in_progress(self): return self._search_in_progress
+    def request_api_settings(self): self.api_settings_requested.emit()
     @property
     def cancel_requested(self): return self._cancel_requested
     def _update_primary_button(self):
@@ -313,6 +320,7 @@ class InputBubble(BubbleFrame):
         if self._pending: return False
         self.response_pinned = False
         self._retry_text = None
+        self._last_error_kind = None
         self._response_generation += 1
         self.response_bubble.hide()
         return True
@@ -327,8 +335,14 @@ class InputBubble(BubbleFrame):
         if not self._can_start_request():return False
         text=self.input.toPlainText().strip()
         if not text:return False
+        if not is_api_key_configured():
+            self._last_error_kind = "missing_key"
+            self._show_response_status("OpenAI APIキーを設定してください。\n入力内容はそのまま残しています。")
+            self.response_bubble.set_copy_enabled(True); self.response_bubble.set_actions_enabled(True); self.response_bubble.show()
+            self.api_settings_requested.emit()
+            return False
         started = self._start_request(text, clear_input=True)
-        if started: self._retry_text=None
+        if started: self._retry_text=None; self._last_error_kind=None
         return started
     def retry_last_request(self):
         text = self._retry_text
@@ -340,6 +354,7 @@ class InputBubble(BubbleFrame):
         return not self._pending and not (self._thread is not None and self._thread.isRunning())
     def _start_request(self, text, *, clear_input):
         if not text or not self._can_start_request(): return False
+        self._last_error_kind=None
         self._cancel_requested=False
         self._reply_text=''; self._search_status_active=False; self.response_pinned=False; self._response_generation += 1
         if clear_input: self.input.clear()
@@ -392,6 +407,7 @@ class InputBubble(BubbleFrame):
         self._search_status_active=False
         self._retry_text=None
         self._active_user_text=None
+        self._last_error_kind=None
         self.response.setText(text); self.response_bubble.setText(text); self.response_bubble.set_copy_enabled(bool(text.strip())); self.response_bubble.set_actions_enabled(bool(text.strip())); self._position_response(); self.conversation.add_assistant(text)
         self._refresh_history_window()
         if not text.strip(): self.response_bubble.hide()
@@ -400,7 +416,9 @@ class InputBubble(BubbleFrame):
         active=self._active_user_text
         if active is not None and self.conversation.remove_last_user(active): self._retry_text=active
         self._active_user_text=None
+        self._last_error_kind=kind
         self.response.setText(message); self.response_bubble.setText(message); self.response_bubble.set_copy_enabled(bool(message.strip())); self.response_bubble.set_actions_enabled(bool(message.strip())); self._position_response(); self._complete()
+        if kind in CONFIGURATION_ERROR_KINDS: QTimer.singleShot(0, self.api_settings_requested.emit)
     def _complete(self):
         self._pending=False; self._search_in_progress=False; self._cancel_requested=False; self._update_primary_button(); self.send_finished.emit()
         self._refresh_history_window(refresh_messages=False)
@@ -420,6 +438,7 @@ class InputBubble(BubbleFrame):
         if thread and not thread.isRunning(): self._thread, self._worker = None, None
         self._retry_text = None
         self._cancel_requested = False
+        self._last_error_kind = None
         if getattr(self, 'history_window', None) is not None: self.history_window.close()
         self.response_bubble.close(); self.closed.emit(); super().closeEvent(event)
 

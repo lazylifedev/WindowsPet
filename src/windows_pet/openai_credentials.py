@@ -32,6 +32,9 @@ def has_stored_key() -> bool:
     try: return bool(kr.get_password(SERVICE_NAME, USERNAME))
     except Exception: return False
 
+def is_api_key_configured() -> bool:
+    return has_environment_key() or has_stored_key()
+
 def save_api_key(value: str) -> None:
     kr = _keyring()
     if kr is None: raise RuntimeError("Credential Manager が利用できません。keyring をインストールしてください。")
