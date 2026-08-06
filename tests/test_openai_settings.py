@@ -26,6 +26,23 @@ def test_has_stored_key_does_not_use_environment(monkeypatch):
     kr = FakeKeyring(); monkeypatch.setattr("windows_pet.openai_credentials._keyring", lambda: kr); monkeypatch.setenv("OPENAI_API_KEY", "environment")
     assert not has_stored_key(); kr.set_password("WindowsPet", "openai_api_key", "dummy"); assert has_stored_key()
 
+def test_unsaved_key_enables_controls_and_has_priority(qapp, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("windows_pet.openai_settings_window.has_stored_key", lambda: False)
+    monkeypatch.setattr("windows_pet.openai_settings_window.get_api_key", lambda: None)
+    from windows_pet.openai_settings_window import OpenAISettingsWindow
+    window = OpenAISettingsWindow(); assert not window.check.isEnabled() and not window.save.isEnabled()
+    window.key.setText("test-only-key"); qapp.processEvents()
+    assert window.check.isEnabled() and window.save.isEnabled() and window._connection_key() == "test-only-key"
+    window.key.clear(); qapp.processEvents(); assert not window.check.isEnabled() and not window.save.isEnabled()
+    window.close()
+
+def test_connection_key_prefers_environment(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "environment-key")
+    monkeypatch.setattr("windows_pet.openai_settings_window.get_api_key", lambda: "environment-key")
+    from windows_pet.openai_settings_window import OpenAISettingsWindow
+    window = OpenAISettingsWindow(); assert window._connection_key() == "environment-key"; window.close()
+
 def test_unconfigured_key_is_none(monkeypatch):
     monkeypatch.setattr("windows_pet.openai_credentials._keyring", lambda: None); monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     assert get_api_key() is None and not has_environment_key()

@@ -29,6 +29,7 @@ class OpenAISettingsWindow(QDialog):
         self._check_thread = None; self._check_worker = None; self._check_in_progress = False
         self._check_generation = 0; self._last_check_result = None
         self.key = QLineEdit(); self.key.setEchoMode(QLineEdit.Password); self.key.setPlaceholderText("sk-…")
+        self.key.textChanged.connect(lambda _text: self._update_controls())
         self.show_button = QPushButton("表示"); self.show_button.setCheckable(True)
         self.show_button.toggled.connect(lambda v: self.key.setEchoMode(QLineEdit.Normal if v else QLineEdit.Password))
         row = QVBoxLayout(); row.addWidget(self.key); row.addWidget(self.show_button)
@@ -51,7 +52,7 @@ class OpenAISettingsWindow(QDialog):
         self.key.setEnabled(not checking and not environment)
         self.show_button.setEnabled(not checking and not environment)
         self.check.setEnabled(not checking and bool(get_api_key() or self.key.text().strip()))
-        self.save.setEnabled(not checking and not environment)
+        self.save.setEnabled(not checking and not environment and bool(self.key.text().strip()))
         self.remove.setEnabled(not checking and has_stored_key())
 
     def showEvent(self, event):
@@ -73,16 +74,21 @@ class OpenAISettingsWindow(QDialog):
 
     def check_connection(self):
         if self._check_in_progress: return False
-        key = get_api_key()
+        key = self._connection_key()
         if not key: self.status.setText("APIキーを設定してください。"); return False
         self._check_generation += 1; generation = self._check_generation; self._check_in_progress = True
         self.status.setText("確認中…"); self._update_controls()
         self._check_thread = QThread(self); self._check_worker = _CheckWorker(key); self._check_worker.moveToThread(self._check_thread)
         self._check_thread.started.connect(self._check_worker.run)
         self._check_worker.finished.connect(lambda ok, text: self._checked(generation, ok, text))
+        self._check_worker.finished.connect(self._check_worker.deleteLater)
         self._check_worker.finished.connect(self._check_thread.quit)
         self._check_thread.finished.connect(self._check_thread_done)
         self._check_thread.start(); return True
+
+    def _connection_key(self):
+        if has_environment_key(): return get_api_key()
+        return self.key.text().strip() or get_api_key()
 
     def _checked(self, generation, ok, text):
         if generation != self._check_generation: return
