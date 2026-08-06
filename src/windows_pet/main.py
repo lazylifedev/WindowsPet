@@ -7,7 +7,7 @@ from PySide6.QtGui import QContextMenuEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QLabel, QMenu, QMessageBox, QWidget
 
 from .animation import load_animations
-from .chat_bubble import ChatBubble, chat_position, response_position
+from .chat_bubble import InputBubble, chat_position, response_position
 from .paths import application_root, assets_root
 from .storage import constrain_to_primary, load_position, save_position
 
@@ -26,13 +26,13 @@ class PetWindow(QWidget):
         self._last_activity = QTimer(self); self._last_activity.setSingleShot(True); self._last_activity.timeout.connect(lambda: self.play("sleep"))
         self._timer = QTimer(self); self._timer.timeout.connect(self._next_frame)
         self._animation = None; self._frame = 0
-        self.chat = ChatBubble(self)
+        self.input_bubble = InputBubble(self)
         self.play("idle"); self._last_activity.start(30000)
 
     def play(self, name: str):
         if name not in self.animations: return
         self._animation, self._frame = self.animations[name], 0; self._timer.stop(); self._show_frame(); self._timer.start(round(1000 / self._animation.fps))
-        if name != "sleep" and not self.chat.isVisible() and not self.chat.pending: self._last_activity.start(30000)
+        if name != "sleep" and not self.input_bubble.isVisible() and not self.input_bubble.pending: self._last_activity.start(30000)
 
     def _show_frame(self): self.label.setPixmap(self._animation.frames[self._frame].scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
     def _next_frame(self):
@@ -44,19 +44,19 @@ class PetWindow(QWidget):
     def resizeEvent(self, event): self.label.resize(self.size()); self._show_frame() if self._animation else None
     def _activity(self):
         if self._animation.name == "sleep": self.play("idle")
-        if not self.chat.isVisible() and not self.chat.pending: self._last_activity.start(30000)
+        if not self.input_bubble.isVisible() and not self.input_bubble.pending: self._last_activity.start(30000)
     def open_chat(self):
-        if not self.chat.isVisible():
+        if not self.input_bubble.isVisible():
             self._show_chat_bubble()
 
     def close_chat(self):
-        if self.chat.isVisible():
+        if self.input_bubble.isVisible():
             self._hide_chat_bubble()
 
     def toggle_chat_bubble(self):
         """Toggle visibility without touching pending API work or conversation state."""
         self._activity()
-        if self.chat.isVisible():
+        if self.input_bubble.isVisible():
             self._hide_chat_bubble()
         else:
             self._show_chat_bubble()
@@ -64,22 +64,23 @@ class PetWindow(QWidget):
     def _show_chat_bubble(self):
         self.play("wave")
         screen = self.screen() or QApplication.primaryScreen()
-        self.chat.adjustSize()
-        position = chat_position(self.frameGeometry(), screen.availableGeometry(), (self.chat.width(), self.chat.height()))
-        self.chat.set_tail_left(position.x() > self.frameGeometry().right())
-        self.chat.move(position); self.chat.show(); self.chat.raise_(); self.chat.activateWindow()
+        self.input_bubble.adjustSize()
+        position = chat_position(self.frameGeometry(), screen.availableGeometry(), (self.input_bubble.width(), self.input_bubble.height()))
+        direction = "top" if position.y() > self.frameGeometry().bottom() else "bottom"
+        self.input_bubble.set_tail_direction(direction)
+        self.input_bubble.set_tail_x(self.frameGeometry().center().x() - position.x())
+        self.input_bubble.move(position); self.input_bubble.show(); self.input_bubble.raise_(); self.input_bubble.activateWindow()
 
     def _hide_chat_bubble(self):
-        self.chat.hide()
-        if not self.chat.pending:
+        self.input_bubble.hide()
+        if not self.input_bubble.pending:
             self.play("idle")
     def moveEvent(self, event):
         super().moveEvent(event)
-        if self.chat.isVisible():
-            screen = self.screen() or QApplication.primaryScreen(); position = chat_position(self.frameGeometry(), screen.availableGeometry(), (self.chat.width(), self.chat.height())); self.chat.set_tail_left(position.x() > self.frameGeometry().right()); self.chat.move(position)
-        if self.chat.response_bubble.isVisible():
-            screen = self.screen() or QApplication.primaryScreen(); r = self.chat.response_bubble
-            area = screen.availableGeometry(); r.move(response_position(self.frameGeometry(), area, r.size()))
+        if self.input_bubble.isVisible():
+            screen = self.screen() or QApplication.primaryScreen(); position = chat_position(self.frameGeometry(), screen.availableGeometry(), (self.input_bubble.width(), self.input_bubble.height())); self.input_bubble.set_tail_direction("top" if position.y() > self.frameGeometry().bottom() else "bottom"); self.input_bubble.set_tail_x(self.frameGeometry().center().x() - position.x()); self.input_bubble.move(position)
+        if self.input_bubble.response_bubble.isVisible():
+            screen = self.screen() or QApplication.primaryScreen(); r = self.input_bubble.response_bubble; area = screen.availableGeometry(); position = response_position(self.frameGeometry(), area, r.size()); r.set_tail_direction("bottom" if position.y() < self.frameGeometry().top() else "top"); r.set_tail_x(self.frameGeometry().center().x() - position.x()); r.move(position)
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
             self._activity(); self._press_position = event.globalPosition().toPoint(); self._drag_offset = self._press_position - self.pos(); self._dragged = False
@@ -97,9 +98,9 @@ class PetWindow(QWidget):
     def contextMenuEvent(self, event: QContextMenuEvent):
         menu = QMenu(self)
         for text, name in (("Play wave", "wave"), ("Play thinking", "thinking"), ("Play sleep", "sleep")): menu.addAction(text, lambda n=name: self.play(n))
-        menu.addSeparator(); menu.addAction("チャットを開く", self.open_chat); menu.addAction("チャットを閉じる", self.close_chat); menu.addAction("Conversation history", self.chat.show_history); menu.addAction("Reset position", self.reset_position); menu.addAction("Quit", QApplication.instance().quit); menu.exec(event.globalPos())
+        menu.addSeparator(); menu.addAction("チャットを開く", self.open_chat); menu.addAction("チャットを閉じる", self.close_chat); menu.addAction("Conversation history", self.input_bubble.show_history); menu.addAction("Reset position", self.reset_position); menu.addAction("Quit", QApplication.instance().quit); menu.exec(event.globalPos())
     def reset_position(self): self.move(100, 100); self._activity()
-    def closeEvent(self, event): self.chat.close(); save_position(self.position_path, self.pos()); super().closeEvent(event)
+    def closeEvent(self, event): self.input_bubble.close(); save_position(self.position_path, self.pos()); super().closeEvent(event)
 
 
 def main() -> int:
@@ -108,7 +109,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     try: animations = load_animations(assets_root()); logging.info("animation assets loaded")
     except RuntimeError as exc: logging.exception("asset loading failed"); QMessageBox.critical(None, "Windows Pet", str(exc)); return 1
-    window = PetWindow(animations, root / "data" / "position.json"); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.show(); logging.info("pet window shown"); app.aboutToQuit.connect(window.chat.close); return app.exec()
+    window = PetWindow(animations, root / "data" / "position.json"); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.show(); logging.info("pet window shown"); app.aboutToQuit.connect(window.input_bubble.close); return app.exec()
 
 
 if __name__ == "__main__": raise SystemExit(main())

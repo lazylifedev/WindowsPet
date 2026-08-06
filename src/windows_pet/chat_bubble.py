@@ -30,7 +30,7 @@ def chat_position(pet_rect: QRect, available: QRect, size=(280, MIN_INPUT_HEIGHT
     return QPoint(x, y)
 
 def response_position(pet_rect: QRect, available: QRect, size) -> QPoint:
-    width, height = size
+    width, height = (size.width(), size.height()) if hasattr(size, "width") else size
     x = pet_rect.center().x() - width // 2
     y = pet_rect.top() - height - 8
     if y < available.top():
@@ -48,20 +48,38 @@ class MessageEdit(QPlainTextEdit):
 class BubbleFrame(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._tail_top = True
+        self._tail_direction = "top"
+        self._tail_x = None
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-    def set_tail_top(self, value): self._tail_top = value; self.update()
+    def set_tail_direction(self, direction):
+        if direction not in ("top", "bottom"):
+            raise ValueError(f"unsupported bubble tail direction: {direction}")
+        self._tail_direction = direction
+        self.update()
+
+    def set_tail_top(self, value):
+        """Compatibility wrapper with an explicit, readable boolean meaning."""
+        self.set_tail_direction("top" if value else "bottom")
+
+    def set_tail_x(self, x):
+        self._tail_x = max(9, min(self.width() - 9, int(x))) if self.width() else int(x)
+        self.update()
+
     def paintEvent(self, event):
         p = QPainter(self); p.setRenderHint(QPainter.Antialiasing)
-        margin = TAIL_HEIGHT if self._tail_top else 0
-        card = QRect(0, margin, self.width(), self.height() - margin)
+        top_margin = TAIL_HEIGHT if self._tail_direction == "top" else 0
+        bottom_margin = TAIL_HEIGHT if self._tail_direction == "bottom" else 0
+        card = QRect(0, top_margin, self.width(), self.height() - top_margin - bottom_margin)
         path = QPainterPath(); path.addRoundedRect(card, 14, 14)
         p.fillPath(path, QColor('#20242b')); p.setPen(QPen(QColor('#4d5663'), 1)); p.drawPath(path)
-        if self._tail_top:
-            x = self.width() // 2
-            tail = QPainterPath(); tail.moveTo(x-9, margin+2); tail.lineTo(x, 0); tail.lineTo(x+9, margin+2); tail.closeSubpath()
-            p.fillPath(tail, QColor('#20242b'))
+        x = self._tail_x if self._tail_x is not None else self.width() // 2
+        tail = QPainterPath()
+        if self._tail_direction == "top":
+            tail.moveTo(x-9, top_margin+2); tail.lineTo(x, 0); tail.lineTo(x+9, top_margin+2)
+        else:
+            tail.moveTo(x-9, self.height()-bottom_margin-2); tail.lineTo(x, self.height()); tail.lineTo(x+9, self.height()-bottom_margin-2)
+        tail.closeSubpath(); p.fillPath(tail, QColor('#20242b'))
 
 class ResponseBubble(BubbleFrame):
     def __init__(self, parent=None):
@@ -93,6 +111,7 @@ class InputBubble(BubbleFrame):
         row.addWidget(self.input); row.addWidget(self.send_button,0,Qt.AlignBottom); self.input.textChanged.connect(self._adjust_input_height); self.input.submit.connect(self.send_message); self.send_button.clicked.connect(self.send_message); self._adjust_input_height()
         self.response=QLabel(''); self.response.hide()
         self.response_bubble=ResponseBubble(); self.response_bubble.hide(); self._reply_text=''
+        self.hide()
     @property
     def pending(self): return self._pending
     def show_history(self): self.history_window=HistoryWindow(self.conversation); self.history_window.show()

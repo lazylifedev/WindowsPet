@@ -3,9 +3,13 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt
 from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QMouseEvent
+from PySide6.QtCore import QPointF
 
 from windows_pet.ai_client import AIClient, AIClientError, _error
 from windows_pet.chat_bubble import ChatBubble, HistoryWindow, MessageEdit, chat_position, response_position
+from windows_pet.main import PetWindow
+from windows_pet.animation import load_animations
 
 
 class Pet:
@@ -114,3 +118,36 @@ def test_position_spec_edges_and_api_error_mapping(monkeypatch):
 def test_pyinstaller_spec_includes_package_modules():
     spec = Path("WindowsPet.spec").read_text(encoding="utf-8")
     assert "collect_submodules('windows_pet')" in spec and "chat_bubble.py" not in spec
+
+
+def test_pet_click_opens_and_closes_real_input_bubble_without_legacy_api(qapp, tmp_path):
+    animations = load_animations(Path("assets/animations"))
+    pet = PetWindow(animations, tmp_path / "position.json")
+    pet.move(300, 300)
+    pet.show(); qapp.processEvents()
+    point = QPointF(30, 30)
+    press = QMouseEvent(QMouseEvent.Type.MouseButtonPress, point, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    release = QMouseEvent(QMouseEvent.Type.MouseButtonRelease, point, Qt.LeftButton, Qt.NoButton, Qt.NoModifier)
+    pet.mousePressEvent(press); pet.mouseReleaseEvent(release); qapp.processEvents()
+    assert pet.input_bubble.isVisible()
+    expected_direction = "top" if pet.input_bubble.y() > pet.frameGeometry().bottom() else "bottom"
+    assert pet.input_bubble._tail_direction == expected_direction
+    pet.mousePressEvent(press); pet.mouseReleaseEvent(release); qapp.processEvents()
+    assert not pet.input_bubble.isVisible()
+    pet.close()
+
+
+def test_pet_drag_does_not_toggle_and_edge_bubbles_have_valid_directions(qapp, tmp_path):
+    animations = load_animations(Path("assets/animations"))
+    pet = PetWindow(animations, tmp_path / "position.json"); pet.move(300, 300); pet.show(); qapp.processEvents()
+    pet.input_bubble.hide()
+    start, end = QPointF(30, 30), QPointF(100, 30)
+    pet.mousePressEvent(QMouseEvent(QMouseEvent.Type.MouseButtonPress, start, start, start, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+    pet.mouseMoveEvent(QMouseEvent(QMouseEvent.Type.MouseMove, end, end, end, Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
+    pet.mouseReleaseEvent(QMouseEvent(QMouseEvent.Type.MouseButtonRelease, end, end, end, Qt.LeftButton, Qt.NoButton, Qt.NoModifier))
+    assert not pet.input_bubble.isVisible()
+    pet.move(0, 700); pet.toggle_chat_bubble(); qapp.processEvents()
+    assert pet.input_bubble.isVisible() and pet.input_bubble._tail_direction == "bottom"
+    pet.input_bubble.response_bubble.setText("reply"); pet.input_bubble._position_response(); pet.input_bubble.response_bubble.show(); qapp.processEvents()
+    assert pet.input_bubble.response_bubble._tail_direction == "top"
+    pet.close()
