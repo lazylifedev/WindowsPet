@@ -41,13 +41,13 @@ class HistoryWindow(QDialog):
 class ChatBubble(QWidget):
     closed = Signal(); send_started = Signal(); send_finished = Signal()
     def __init__(self, pet):
-        super().__init__(); self.pet = pet; self._pending = False; self.conversation = Conversation(); self._thread = None; self._worker = None; self._reply_bubble = None; self._reply_text = ""; self._tail_left = True; self.history_window = None
+        super().__init__(); self.pet = pet; self._pending = False; self.conversation = Conversation(); self._thread = None; self._worker = None; self._reply_bubble = None; self._reply_text = ""; self._tail_left = True; self.history_window = None; self.response_pinned = False
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool); self.setAttribute(Qt.WA_TranslucentBackground); self.setMinimumSize(CHAT_MIN_WIDTH, CHAT_MIN_HEIGHT); self.resize(CHAT_WIDTH, CHAT_HEIGHT)
         self.card = QFrame(self); self.card.setStyleSheet("QFrame { background:#fffdf8; border:1px solid #d7cfc2; border-radius:18px; }"); shadow = QGraphicsDropShadowEffect(self.card); shadow.setBlurRadius(20); shadow.setOffset(0, 5); shadow.setColor(QColor(0,0,0,45)); self.card.setGraphicsEffect(shadow)
         outer = QVBoxLayout(self); outer.setContentsMargins(TAIL_WIDTH, 8, TAIL_WIDTH, 8); outer.addWidget(self.card); layout = QVBoxLayout(self.card); layout.setContentsMargins(14,12,14,12); layout.setSpacing(10)
         title = QLabel("Luna"); title.setFont(QFont("Segoe UI", 11, QFont.Bold)); title.setStyleSheet("color:#292d35;"); close = QPushButton("×"); close.setFixedSize(28,28); close.clicked.connect(self.close); history = QPushButton("History"); history.clicked.connect(self.show_history); head = QHBoxLayout(); head.addWidget(title); head.addStretch(); head.addWidget(history); head.addWidget(close); layout.addLayout(head)
         self.response = QLabel("Hello! How can I help?"); self.response.setWordWrap(True); self.response.setTextInteractionFlags(Qt.TextSelectableByMouse); self.response.setStyleSheet("padding:10px 12px; background:#fffdf8; color:#292d35; border:1px solid #e6ded2; border-radius:14px;"); layout.addWidget(self.response)
-        self.input = MessageEdit(); self.input.setPlaceholderText("Type a message..."); self.input.setMinimumHeight(48); self.input.setMaximumHeight(120); self.input.submit.connect(self.send_message); self.send_button = QPushButton("➤"); self.send_button.setFixedSize(38,38); self.send_button.clicked.connect(self.send_message); row=QHBoxLayout(); row.addWidget(self.input); row.addWidget(self.send_button,0,Qt.AlignBottom); layout.addLayout(row)
+        self.input = MessageEdit(); self.input.setPlaceholderText("Type a message..."); self.input.setMinimumHeight(48); self.input.setMaximumHeight(120); self.input.textChanged.connect(self._adjust_input_height); self.input.submit.connect(self.send_message); self.send_button = QPushButton("➤"); self.send_button.setFixedSize(38,38); self.send_button.clicked.connect(self.send_message); row=QHBoxLayout(); row.addWidget(self.input); row.addWidget(self.send_button,0,Qt.AlignBottom); layout.addLayout(row)
     @property
     def pending(self): return self._pending
     def paintEvent(self, event):
@@ -55,17 +55,27 @@ class ChatBubble(QWidget):
     def set_tail_left(self, value): self._tail_left=value; self.update()
     def show_history(self):
         self.history_window=HistoryWindow(self.conversation, self); self.history_window.show(); self.history_window.raise_()
-    def clear_messages(self): self.conversation.clear(); self.response.setText("Hello! How can I help?")
+    def clear_messages(self):
+        if self._pending: return False
+        self.conversation.clear(); self.response.setText("Hello! How can I help?"); return True
+    def set_response_pinned(self, pinned): self.response_pinned = pinned
+    def _adjust_input_height(self):
+        height = min(120, max(48, int(self.input.document().size().height()) + 18))
+        self.input.setFixedHeight(height); self.adjustSize()
     def send_message(self):
         if self._pending: return False
         text=self.input.toPlainText().strip()
         if not text: return False
-        self.input.clear(); self.conversation.add_user(text); self.response.setText("…"); self._reply_text=""; self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking')
+        self.input.clear(); self.conversation.add_user(text); self.response.show(); self.response.setText("…"); self._reply_text=""; self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking')
         self._thread=QThread(self); self._worker=AIWorker(self.conversation.messages()); self._worker.moveToThread(self._thread); self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.finished.connect(self._on_finished); self._worker.failed.connect(self._on_failed); self._worker.finished.connect(self._thread.quit); self._worker.failed.connect(self._thread.quit); self._thread.finished.connect(self._thread_done); self._thread.start(); return True
     def _on_delta(self,text): self._reply_text+=text; self.response.setText(self._reply_text)
     def _on_finished(self,text): self.response.setText(text); self.conversation.add_assistant(text); self._complete()
     def _on_failed(self,kind,message): self.response.setText(message); self._complete()
-    def _complete(self): self._pending=False; self.send_button.setEnabled(True); self.send_finished.emit(); self.pet.play('idle')
+    def _complete(self):
+        self._pending=False; self.send_button.setEnabled(True); self.send_finished.emit(); self.pet.play('idle')
+        if not self.response_pinned: QTimer.singleShot(12000, self._auto_hide_response)
+    def _auto_hide_response(self):
+        if not self._pending and not self.response_pinned: self.response.hide()
     def _thread_done(self): self._thread=None; self._worker=None
     def showEvent(self,event): super().showEvent(event); self.input.setFocus()
     def closeEvent(self,event):
