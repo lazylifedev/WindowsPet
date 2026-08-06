@@ -58,22 +58,26 @@ class AIClient:
             raise AIClientError("missing_key", "OpenAI APIキーが設定されていません。")
         self.client = client or OpenAI(api_key=key, timeout=timeout, max_retries=0)
 
-    def stream(self, history: list[dict[str, str]], on_delta: Callable[[str], None]) -> str:
+    def stream(self, history: list[dict[str, str]], on_delta: Callable[[str], None], cancel=None) -> str:
         try:
             tools = [{"type": "function", "name": "search_files", "description": "許可済み検索ルートのファイル名・フォルダー名・メタデータだけを読み取り専用で検索します。ファイル内容は検索しません。", "parameters": {"type":"object", "properties": {"query":{"type":"string"}, "root_ids":{"type":"array","items":{"type":"string"}}, "extensions":{"type":"array","items":{"type":"string"}}, "modified_after":{"type":["string","null"]}, "modified_before":{"type":["string","null"]}, "min_size_bytes":{"type":["integer","null"]}, "max_size_bytes":{"type":["integer","null"]}, "include_directories":{"type":"boolean"}, "max_results":{"type":"integer"}}, "required":["query","root_ids","extensions","modified_after","modified_before","min_size_bytes","max_size_bytes","include_directories","max_results"], "additionalProperties":False}, "strict": True}]
+            self._raise_if_cancelled(cancel)
             stream: Iterable = self.client.responses.create(
                 model=model_name(), instructions=INSTRUCTIONS, input=history,
                 tools=tools, stream=True, store=False,
             )
+            self._raise_if_cancelled(cancel)
             parts: list[str] = []
             # Streaming text remains compatible with the existing UI. Tool calls
             # are handled through a bounded non-streaming continuation below.
             for event in stream:
+                self._raise_if_cancelled(cancel)
                 if getattr(event, "type", "") == "response.output_text.delta":
                     delta = getattr(event, "delta", "")
                     if delta:
                         self._raise_if_cancelled(cancel)
                         parts.append(delta); on_delta(delta)
+            self._raise_if_cancelled(cancel)
             return "".join(parts)
         except AIClientError:
             raise
