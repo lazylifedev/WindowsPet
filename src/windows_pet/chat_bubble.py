@@ -122,7 +122,7 @@ class InputBubble(BubbleFrame):
     pointer_left = Signal()
     focus_state_changed = Signal(bool)
     draft_state_changed = Signal(bool)
-    closed=Signal(); send_started=Signal(); send_finished=Signal()
+    closed=Signal(); send_started=Signal(); send_finished=Signal(); search_completed=Signal(dict)
     def __init__(self, pet):
         super().__init__(); self.pet=pet; self._pending=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -155,6 +155,12 @@ class InputBubble(BubbleFrame):
         return super().eventFilter(watched, qt_event)
     @property
     def pending(self): return self._pending
+    def cancel_search(self):
+        worker = self._worker
+        if worker is not None and hasattr(worker, 'cancel'):
+            worker.cancel()
+            return True
+        return False
     def show_history(self): self.history_window=HistoryWindow(self.conversation); self.history_window.show()
     def clear_messages(self):
         if self._pending:return False
@@ -171,7 +177,11 @@ class InputBubble(BubbleFrame):
         if self._pending:return False
         text=self.input.toPlainText().strip()
         if not text:return False
-        self.input.clear(); self.conversation.add_user(text); self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking'); self.response_bubble.setText('考え中…'); self._position_response(); self.response_bubble.show(); self._thread=QThread(self); self._worker=AIWorker(self.conversation.messages()); self._worker.moveToThread(self._thread); self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.finished.connect(self._on_finished); self._worker.failed.connect(self._on_failed); self._worker.finished.connect(self._thread.quit); self._worker.failed.connect(self._thread.quit); self._thread.finished.connect(self._thread_done); self._thread.start(); return True
+        self._reply_text=''
+        self.input.clear(); self.conversation.add_user(text); self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking'); self.response_bubble.setText('考え中…'); self._position_response(); self.response_bubble.show()
+        self._thread=QThread(self); self._worker=AIWorker(self.conversation.messages()); self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.search_completed.connect(self.search_completed)
+        self._worker.finished.connect(self._on_finished); self._worker.failed.connect(self._on_failed); self._worker.finished.connect(self._thread.quit); self._worker.failed.connect(self._thread.quit); self._thread.finished.connect(self._thread_done); self._thread.start(); return True
     def _position_response(self):
         if not hasattr(self.pet, 'frameGeometry'): return
         screen=self.pet.screen() if hasattr(self.pet, 'screen') else None; area=(screen or QApplication.primaryScreen()).availableGeometry(); r=self.response_bubble

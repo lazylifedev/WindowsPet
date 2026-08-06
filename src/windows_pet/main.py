@@ -10,6 +10,9 @@ from .animation import load_animations
 from .chat_bubble import InputBubble, chat_position, response_position
 from .paths import application_root, assets_root
 from .storage import constrain_to_primary, load_position, save_position
+from .file_search_settings_window import FileSearchSettingsWindow
+from .search_results_window import SearchResultsWindow
+from .search_result_store import SearchResultStore
 
 
 class PetWindow(QWidget):
@@ -27,6 +30,10 @@ class PetWindow(QWidget):
         self._timer = QTimer(self); self._timer.timeout.connect(self._next_frame)
         self._animation = None; self._frame = 0
         self.input_bubble = InputBubble(self)
+        self.search_store = SearchResultStore()
+        self.search_settings_window = None
+        self.search_results_window = None
+        self.input_bubble.search_completed.connect(self._on_search_completed)
         self._pet_hovered = False; self._input_hovered = False; self._input_has_focus = False
         self._draft_exists = False; self._api_request_in_progress = False
         self._input_hide_timer = QTimer(self); self._input_hide_timer.setSingleShot(True); self._input_hide_timer.timeout.connect(self._hide_input_if_allowed)
@@ -147,9 +154,41 @@ class PetWindow(QWidget):
         if event.button() == Qt.LeftButton: self.open_chat()
     def contextMenuEvent(self, event: QContextMenuEvent):
         menu = QMenu(self)
+        menu.addAction('ファイル検索設定', self.open_file_search_settings)
+        recent = menu.addAction('最近の検索結果', self.show_recent_search)
+        recent.setEnabled(self.search_store.latest() is not None)
+        cancel = menu.addAction('検索をキャンセル', self.input_bubble.cancel_search)
+        cancel.setEnabled(self.input_bubble.pending)
+        menu.addSeparator()
+        menu.addAction('チャットを開く', self.open_chat)
+        menu.addAction('チャットを閉じる', self.close_chat)
+        menu.addAction('Conversation history', self.input_bubble.show_history)
+        menu.addAction('Reset position', self.reset_position)
+        menu.addAction('Quit', QApplication.instance().quit)
+        menu.exec(event.globalPos())
+        return
+        menu = QMenu(self)
         for text, name in (("Play wave", "wave"), ("Play thinking", "thinking"), ("Play sleep", "sleep")): menu.addAction(text, lambda n=name: self.play(n))
         menu.addSeparator(); menu.addAction("チャットを開く", self.open_chat); menu.addAction("チャットを閉じる", self.close_chat); menu.addAction("Conversation history", self.input_bubble.show_history); menu.addAction("Reset position", self.reset_position); menu.addAction("Quit", QApplication.instance().quit); menu.exec(event.globalPos())
     def reset_position(self): self.move(100, 100); self._activity()
+    def open_file_search_settings(self):
+        if self.search_settings_window is None:
+            self.search_settings_window = FileSearchSettingsWindow(parent=self)
+        self.search_settings_window.show(); self.search_settings_window.raise_(); self.search_settings_window.activateWindow()
+    def show_recent_search(self):
+        session = self.search_store.latest()
+        if session:
+            if self.search_results_window is None or self.search_results_window.session is not session:
+                self.search_results_window = SearchResultsWindow(session)
+            self.search_results_window.show(); self.search_results_window.raise_(); self.search_results_window.activateWindow()
+    def _on_search_completed(self, result):
+        session = self.search_store.add(result.get('query', ''), tuple(result.get('root_ids', ())), result)
+        if self.search_results_window is None:
+            self.search_results_window = SearchResultsWindow(session, self)
+        else:
+            self.search_results_window.session = session
+            self.search_results_window._populate()
+        self.search_results_window.show(); self.search_results_window.raise_(); self.search_results_window.activateWindow()
     def closeEvent(self, event): self.input_bubble.close(); save_position(self.position_path, self.pos()); super().closeEvent(event)
 
 
