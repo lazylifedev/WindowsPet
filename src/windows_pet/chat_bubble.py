@@ -29,6 +29,15 @@ def chat_position(pet_rect: QRect, available: QRect, size=(280, MIN_INPUT_HEIGHT
     y = min(max(y, available.top()), available.bottom() - height + 1)
     return QPoint(x, y)
 
+def response_position(pet_rect: QRect, available: QRect, size) -> QPoint:
+    width, height = size
+    x = pet_rect.center().x() - width // 2
+    y = pet_rect.top() - height - 8
+    if y < available.top():
+        y = pet_rect.bottom() + 1 + 8
+    return QPoint(min(max(x, available.left()), available.right() - width + 1),
+                  min(max(y, available.top()), available.bottom() - height + 1))
+
 class MessageEdit(QPlainTextEdit):
     submit = Signal()
     def keyPressEvent(self, event):
@@ -92,7 +101,10 @@ class InputBubble(BubbleFrame):
         self.conversation.clear(); return True
     def set_response_pinned(self,pinned): self.response_pinned=pinned
     def _adjust_input_height(self):
-        doc_h=self.input.document().documentLayout().documentSize().height(); height=max(48,min(MAX_INPUT_HEIGHT-10,int(doc_h+14))); self.input.setFixedHeight(height); self.adjustSize()
+        doc_h=self.input.document().documentLayout().documentSize().height()
+        line_h=self.input.fontMetrics().lineSpacing()
+        doc_h=max(doc_h, self.input.document().blockCount() * line_h)
+        height=max(48,min(MAX_INPUT_HEIGHT-10,int(doc_h+14))); self.input.setFixedHeight(height); self.adjustSize()
     def send_message(self):
         if self._pending:return False
         text=self.input.toPlainText().strip()
@@ -101,10 +113,12 @@ class InputBubble(BubbleFrame):
     def _position_response(self):
         if not hasattr(self.pet, 'frameGeometry'): return
         screen=self.pet.screen() if hasattr(self.pet, 'screen') else None; area=(screen or QApplication.primaryScreen()).availableGeometry(); r=self.response_bubble
-        x=self.pet.frameGeometry().center().x()-r.width()//2; y=self.pet.frameGeometry().top()-r.height()-8
-        r.move(min(max(x,area.left()),area.right()-r.width()+1),max(area.top(),y))
+        r.move(response_position(self.pet.frameGeometry(), area, r.size()))
     def _on_delta(self,text): self._reply_text+=text; self.response.setText(self._reply_text); self.response_bubble.setText(self._reply_text)
-    def _on_finished(self,text): self.response.setText(text); self.response_bubble.setText(text); self.conversation.add_assistant(text); self._complete()
+    def _on_finished(self,text):
+        self.response.setText(text); self.response_bubble.setText(text); self.conversation.add_assistant(text)
+        if not text.strip(): self.response_bubble.hide()
+        self._complete()
     def _on_failed(self,kind,message): self.response.setText(message); self.response_bubble.setText(message); self._complete()
     def _complete(self):
         self._pending=False; self.send_button.setEnabled(True); self.send_finished.emit(); self.pet.play('idle')

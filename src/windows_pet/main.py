@@ -7,7 +7,7 @@ from PySide6.QtGui import QContextMenuEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QLabel, QMenu, QMessageBox, QWidget
 
 from .animation import load_animations
-from .chat_bubble import ChatBubble, chat_position
+from .chat_bubble import ChatBubble, chat_position, response_position
 from .paths import application_root, assets_root
 from .storage import constrain_to_primary, load_position, save_position
 
@@ -79,9 +79,7 @@ class PetWindow(QWidget):
             screen = self.screen() or QApplication.primaryScreen(); position = chat_position(self.frameGeometry(), screen.availableGeometry(), (self.chat.width(), self.chat.height())); self.chat.set_tail_left(position.x() > self.frameGeometry().right()); self.chat.move(position)
         if self.chat.response_bubble.isVisible():
             screen = self.screen() or QApplication.primaryScreen(); r = self.chat.response_bubble
-            x = self.frameGeometry().center().x() - r.width() // 2
-            y = self.frameGeometry().top() - r.height() - 8
-            area = screen.availableGeometry(); r.move(min(max(x, area.left()), area.right()-r.width()+1), max(area.top(), y))
+            area = screen.availableGeometry(); r.move(response_position(self.frameGeometry(), area, r.size()))
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
             self._activity(); self._press_position = event.globalPosition().toPoint(); self._drag_offset = self._press_position - self.pos(); self._dragged = False

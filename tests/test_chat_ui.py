@@ -5,7 +5,7 @@ from PySide6.QtCore import QEvent, QPoint, QRect, Qt
 from PySide6.QtGui import QKeyEvent
 
 from windows_pet.ai_client import AIClient, AIClientError, _error
-from windows_pet.chat_bubble import ChatBubble, HistoryWindow, MessageEdit, chat_position
+from windows_pet.chat_bubble import ChatBubble, HistoryWindow, MessageEdit, chat_position, response_position
 
 
 class Pet:
@@ -41,7 +41,7 @@ def test_shift_enter_inserts_newline_and_blank_is_rejected(qapp):
 def test_input_grows_but_is_capped(qapp):
     chat = make_chat(qapp)
     chat.input.setPlainText("\n".join(["line"] * 30)); qapp.processEvents()
-    assert 48 <= chat.input.height() <= 120
+    assert 48 <= chat.input.height() <= 130
     chat.close()
 
 
@@ -72,12 +72,38 @@ def test_response_auto_hide_and_pinned(monkeypatch, qapp):
     chat = make_chat(qapp); chat._complete(); assert timers; timers.pop()(); assert not chat.response.isVisible()
     chat.response.show(); chat.set_response_pinned(True); chat._complete(); assert not timers; assert chat.response.isVisible(); chat.close()
 
+def test_input_height_contract_and_reset(qapp):
+    chat = make_chat(qapp)
+    assert 48 <= chat.input.height() <= 130
+    chat.input.setPlainText("\n".join(["line"] * 8)); qapp.processEvents()
+    grown = chat.input.height()
+    chat.input.setPlainText("\n".join(["line"] * 40)); qapp.processEvents()
+    assert grown > 48 and chat.input.height() <= 130
+    chat.input.clear(); qapp.processEvents(); assert 48 <= chat.input.height() <= 50
+    chat.close()
 
-def test_position_edges_and_api_error_mapping(monkeypatch):
+def test_response_empty_and_simultaneous_bubbles_are_safe(qapp):
+    chat = make_chat(qapp)
+    chat.response_bubble.setText("answer"); chat._position_response(); chat.response_bubble.show(); qapp.processEvents()
+    assert chat.response_bubble.y() + chat.response_bubble.height() <= qapp.primaryScreen().availableGeometry().bottom() + 1
+    chat._on_finished("")
+    assert not chat.response_bubble.isVisible()
+    chat.close()
+
+
+def test_position_spec_edges_and_api_error_mapping(monkeypatch):
     screen = QRect(0, 0, 1000, 800)
-    assert chat_position(QRect(400, 0, 100, 100), screen).y() == 0
-    assert chat_position(QRect(400, 750, 100, 50), screen).y() == 515
-    assert chat_position(QRect(0, 300, 100, 100), screen).x() >= 0
+    center = chat_position(QRect(400, 300, 100, 100), screen, (280, 100))
+    assert center.y() > 400 and center.x() == 309
+    top = chat_position(QRect(400, 0, 100, 100), screen, (280, 100))
+    assert top.y() == 108
+    bottom = chat_position(QRect(400, 750, 100, 50), screen, (280, 100))
+    assert bottom.y() < 750 and bottom.y() >= 0
+    assert chat_position(QRect(0, 300, 100, 100), screen, (280, 100)).x() == 0
+    assert chat_position(QRect(900, 300, 100, 100), screen, (280, 100)).x() == 720
+    response = response_position(QRect(400, 300, 100, 100), screen, (280, 100))
+    assert response.y() < 300
+    assert response_position(QRect(400, 0, 100, 100), screen, (280, 100)).y() > 100
     assert _error(RuntimeError("401 unauthorized")).kind == "auth"
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     try: AIClient()
