@@ -232,6 +232,47 @@ def test_response_stream_repositions_after_each_resize_and_clamps_edges(qapp):
         assert chat.response_bubble.x() != old_x or chat.response_bubble.width() >= 90
     close_chat(chat, qapp)
 
+
+def test_response_bubble_keeps_plain_text_and_scrolls_long_answers(qapp):
+    chat = make_chat(qapp)
+    text = '<b>タグ</b>\n' + ('長い回答です。' * 300)
+    chat.response_bubble.setText(text)
+    chat.response_bubble.show(); qapp.processEvents()
+    assert chat.response_bubble.toPlainText() == text
+    assert chat.response_bubble.label.toPlainText() == text
+    assert chat.response_bubble.width() == 420
+    assert chat.response_bubble.height() <= 320 + 18
+    assert chat.response_bubble.label.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+    assert chat.response_bubble.label.verticalScrollBarPolicy() == Qt.ScrollBarAsNeeded
+    close_chat(chat, qapp)
+
+
+def test_response_actions_pin_unpin_and_close_preserve_history(qapp):
+    chat = make_chat(qapp)
+    chat._pending = False
+    chat._on_finished('回答本文')
+    chat.response_bubble.show()
+    chat.response_bubble._toggle_pin()
+    assert chat.response_pinned is True
+    chat.response_bubble._toggle_pin()
+    assert chat.response_pinned is False
+    assert chat.response_bubble.isVisible()
+    assert chat.close_response() is True
+    assert not chat.response_bubble.isVisible()
+    assert chat.conversation.messages()[-1]['content'] == '回答本文'
+    close_chat(chat, qapp)
+
+
+def test_response_actions_are_disabled_while_processing(qapp):
+    chat = make_chat(qapp)
+    chat._pending = True
+    chat._on_search_started()
+    assert chat.response_bubble._copy_enabled is False
+    assert chat.response_bubble._actions_enabled is False
+    assert chat.response_bubble._pending_parent() is True
+    assert chat.close_response() is False
+    close_chat(chat, qapp)
+
 def test_input_position_is_centered_below_and_tail_is_clamped(qapp):
     chat = make_chat(qapp)
     pet = type("Pet", (), {"frameGeometry": lambda self: QRect(0, 300, 100, 100),

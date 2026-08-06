@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, QPoint, QRect, QThread, Qt, Signal, QTimer
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QDialog, QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
-    QLabel, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget, QApplication)
+    QLabel, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget, QApplication, QTextBrowser, QMenu)
 
 from .ai_worker import AIWorker
 from .conversation import Conversation
@@ -97,17 +97,57 @@ class BubbleFrame(QWidget):
 
 class ResponseBubble(BubbleFrame):
     def __init__(self, parent=None):
-        super().__init__(parent); self.label = QLabel(self); self.label.setWordWrap(True); self.label.setStyleSheet('color:white; padding:10px 14px;'); self._text=''
+        super().__init__(parent)
+        self.label = QTextBrowser(self)
+        self.label.setReadOnly(True)
+        self.label.setOpenExternalLinks(False)
+        self.label.setUndoRedoEnabled(False)
+        self.label.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.label.setStyleSheet('QTextBrowser{color:white; background:transparent; border:0; padding:10px 14px;}')
+        self.label.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.label.customContextMenuRequested.connect(self._show_context_menu)
+        self._text=''; self._copy_enabled = False; self._actions_enabled = True
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
     def setText(self, text):
-        self._text=text; self.label.setText(text); self.label.adjustSize(); self.resize(min(380, max(90, self.label.sizeHint().width()+28)), min(180, max(44, self.label.sizeHint().height()+TAIL_HEIGHT+8))); self._layout_label()
+        self._text = text
+        self.label.setPlainText(text)
+        self.label.setFixedWidth(420)
+        self.label.document().setTextWidth(392)
+        content_height = int(self.label.document().size().height()) + 20
+        panel_height = max(44, min(320, content_height))
+        self.resize(420, panel_height + TAIL_HEIGHT)
+        self.label.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded if content_height > 320 else Qt.ScrollBarAlwaysOff)
+        self._layout_label()
     def set_tail_direction(self, direction):
         super().set_tail_direction(direction)
         self._layout_label()
     def _layout_label(self):
         margin = TAIL_HEIGHT if self._tail_direction == "top" else 0
         self.label.setGeometry(0, margin, self.width(), max(0, self.height() - margin - (TAIL_HEIGHT if self._tail_direction == "bottom" else 0)))
+    def set_copy_enabled(self, enabled): self._copy_enabled = bool(enabled)
+    def set_actions_enabled(self, enabled): self._actions_enabled = bool(enabled)
+    def _show_context_menu(self, position):
+        menu = QMenu(self)
+        copy_action = menu.addAction('回答をコピー')
+        copy_action.setEnabled(self._actions_enabled and self._copy_enabled)
+        copy_action.triggered.connect(lambda: QApplication.clipboard().setText(self.toPlainText()))
+        menu.addSeparator()
+        pin_action = menu.addAction('固定を解除' if getattr(self.parent(), 'response_pinned', False) else '回答を固定')
+        pin_action.setEnabled(self._actions_enabled and not self._pending_parent())
+        pin_action.triggered.connect(self._toggle_pin)
+        menu.addAction('閉じる', self._close_response).setEnabled(self._actions_enabled and not self._pending_parent())
+        menu.exec(self.label.mapToGlobal(position))
+    def _pending_parent(self):
+        parent = self.parent()
+        return bool(parent is not None and getattr(parent, 'pending', False))
+    def _toggle_pin(self):
+        parent = self.parent()
+        if parent is not None: parent.set_response_pinned(not parent.response_pinned)
+    def _close_response(self):
+        parent = self.parent()
+        if parent is not None: parent.close_response()
+    def toPlainText(self): return self._text
 
 class HistoryWindow(QDialog):
     def __init__(self, conversation, parent=None):
@@ -137,7 +177,7 @@ class InputBubble(BubbleFrame):
         self.send_button=QPushButton('➤'); self.send_button.setFixedSize(34,34); self.send_button.setStyleSheet('QPushButton{color:white;background:#4d78b8;border:0;border-radius:8px;}')
         row.addWidget(self.input); row.addWidget(self.send_button,0,Qt.AlignBottom); self.input.textChanged.connect(self._adjust_input_height); self.input.submit.connect(self.send_message); self.send_button.clicked.connect(self.send_message); self._adjust_input_height()
         self.response=QLabel(''); self.response.hide()
-        self.response_bubble=ResponseBubble(); self.response_bubble.hide(); self._reply_text=''
+        self.response_bubble=ResponseBubble(self); self.response_bubble.hide(); self._reply_text=''; self._response_generation = 0
         self.input.textChanged.connect(lambda: self.draft_state_changed.emit(bool(self.input.toPlainText().strip())))
         self.input.installEventFilter(self)
         self.hide()
@@ -168,6 +208,12 @@ class InputBubble(BubbleFrame):
         if self._pending:return False
         self.conversation.clear(); return True
     def set_response_pinned(self,pinned): self.response_pinned=pinned
+    def close_response(self):
+        if self._pending: return False
+        self.response_pinned = False
+        self._response_generation += 1
+        self.response_bubble.hide()
+        return True
     def _adjust_input_height(self):
         doc_h=self.input.document().documentLayout().documentSize().height()
         line_h=self.input.fontMetrics().lineSpacing()
@@ -179,7 +225,7 @@ class InputBubble(BubbleFrame):
         if self._pending:return False
         text=self.input.toPlainText().strip()
         if not text:return False
-        self._reply_text=''; self._search_status_active=False
+        self._reply_text=''; self._search_status_active=False; self._response_generation += 1
         self.input.clear(); self.conversation.add_user(text); self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking'); self.response_bubble.setText('考え中…'); self._position_response(); self.response_bubble.show()
         self._thread=QThread(self); self._worker=self._worker_factory(self.conversation.messages()); self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.search_started.connect(self._on_search_started); self._worker.search_completed.connect(self._on_search_completed)
@@ -204,6 +250,7 @@ class InputBubble(BubbleFrame):
     def _show_response_status(self, text: str) -> None:
         self.response.setText(text)
         self.response_bubble.setText(text)
+        self.response_bubble.set_copy_enabled(False); self.response_bubble.set_actions_enabled(False)
         self._position_response()
         if self._pending:
             self.response_bubble.show()
@@ -221,17 +268,20 @@ class InputBubble(BubbleFrame):
     def _on_delta(self,text):
         if self._search_status_active:
             self._reply_text=''; self._search_status_active=False
-        self._reply_text+=text; self.response.setText(self._reply_text); self.response_bubble.setText(self._reply_text); self._position_response()
+        self._reply_text+=text; self.response.setText(self._reply_text); self.response_bubble.setText(self._reply_text); self.response_bubble.set_copy_enabled(False); self.response_bubble.set_actions_enabled(False); self._position_response()
     def _on_finished(self,text):
         self._search_status_active=False
-        self.response.setText(text); self.response_bubble.setText(text); self._position_response(); self.conversation.add_assistant(text)
+        self.response.setText(text); self.response_bubble.setText(text); self.response_bubble.set_copy_enabled(bool(text.strip())); self.response_bubble.set_actions_enabled(bool(text.strip())); self._position_response(); self.conversation.add_assistant(text)
         if not text.strip(): self.response_bubble.hide()
         self._complete()
-    def _on_failed(self,kind,message): self.response.setText(message); self.response_bubble.setText(message); self._position_response(); self._complete()
+    def _on_failed(self,kind,message): self.response.setText(message); self.response_bubble.setText(message); self.response_bubble.set_copy_enabled(bool(message.strip())); self.response_bubble.set_actions_enabled(bool(message.strip())); self._position_response(); self._complete()
     def _complete(self):
         self._pending=False; self._search_in_progress=False; self.send_button.setEnabled(True); self.send_finished.emit(); self.pet.play('idle')
-        if not self.response_pinned: QTimer.singleShot(12000,self._auto_hide_response)
-    def _auto_hide_response(self):
+        if not self.response_pinned:
+            generation = self._response_generation
+            QTimer.singleShot(12000, lambda: self._auto_hide_response(generation))
+    def _auto_hide_response(self, generation=None):
+        if generation is not None and generation != self._response_generation: return
         if not self._pending and not self.response_pinned:self.response_bubble.hide()
     def _thread_done(self): self._thread=None; self._worker=None
     def closeEvent(self,event):
