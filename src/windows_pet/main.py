@@ -46,8 +46,33 @@ class PetWindow(QWidget):
         if self._animation.name == "sleep": self.play("idle")
         if not self.chat.isVisible() and not self.chat.pending: self._last_activity.start(30000)
     def open_chat(self):
-        self._activity(); self.play("wave"); screen = self.screen() or QApplication.primaryScreen(); self.chat.adjustSize(); position = chat_position(self.frameGeometry(), screen.availableGeometry(), (self.chat.width(), self.chat.height())); self.chat.set_tail_left(position.x() > self.frameGeometry().right()); self.chat.move(position); self.chat.show(); self.chat.raise_(); self.chat.activateWindow()
-    def close_chat(self): self.chat.close()
+        if not self.chat.isVisible():
+            self._show_chat_bubble()
+
+    def close_chat(self):
+        if self.chat.isVisible():
+            self._hide_chat_bubble()
+
+    def toggle_chat_bubble(self):
+        """Toggle visibility without touching pending API work or conversation state."""
+        self._activity()
+        if self.chat.isVisible():
+            self._hide_chat_bubble()
+        else:
+            self._show_chat_bubble()
+
+    def _show_chat_bubble(self):
+        self.play("wave")
+        screen = self.screen() or QApplication.primaryScreen()
+        self.chat.adjustSize()
+        position = chat_position(self.frameGeometry(), screen.availableGeometry(), (self.chat.width(), self.chat.height()))
+        self.chat.set_tail_left(position.x() > self.frameGeometry().right())
+        self.chat.move(position); self.chat.show(); self.chat.raise_(); self.chat.activateWindow()
+
+    def _hide_chat_bubble(self):
+        self.chat.hide()
+        if not self.chat.pending:
+            self.play("idle")
     def moveEvent(self, event):
         super().moveEvent(event)
         if self.chat.isVisible():
@@ -63,7 +88,7 @@ class PetWindow(QWidget):
         if event.button() == Qt.LeftButton:
             dragged = self._dragged; self._drag_offset = None; self._press_position = None
             if dragged: self.play("wave")
-            else: self.open_chat()
+            else: self.toggle_chat_bubble()
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton: self.open_chat()
     def contextMenuEvent(self, event: QContextMenuEvent):
