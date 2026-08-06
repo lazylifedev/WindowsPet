@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from .action_models import ActionProposal, ConfirmationDecision, PolicyDecision, ToolContract
 from enum import Enum
 from .audit_log import AuditEvent, AuditSink
-from .execution_grant import ExecutionGrant, ExecutionGrantStore
+from .execution_grant import ExecutionGrant, ExecutionGrantIssuer, ExecutionGrantStore
 from .policy_gate import PolicyGate
 
 
@@ -33,6 +33,7 @@ class ConfirmationGate:
     def __init__(self, policy=None, grants=None, audit=None):
         self.policy = policy or PolicyGate()
         self.grants = grants or ExecutionGrantStore()
+        self.issuer = ExecutionGrantIssuer(self.grants)
         self.audit = audit
         self._sessions = {}
         self._lock = threading.Lock()
@@ -69,7 +70,8 @@ class ConfirmationGate:
         if result.decision is not PolicyDecision.REQUIRE_CONFIRMATION:
             self._audit("policy_denied", proposal, result.reason)
             return None
-        grant = self.grants._issue_for_session(proposal, session_id or "")
+        capability = self.issuer.capability(session_id or "", proposal)
+        grant = self.issuer.issue(capability, proposal)
         with self._lock:
             self._sessions[session_id] = (session_state[0], SessionState.APPROVED)
         self._audit("confirmation_approved", proposal, "ok", grant)

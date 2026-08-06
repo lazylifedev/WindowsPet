@@ -44,6 +44,13 @@ class _GrantRecord:
     state: GrantState = GrantState.ACTIVE
 
 
+class _ApprovedCapability:
+    def __init__(self, session_id: str, proposal: ActionProposal):
+        self.session_id = session_id
+        self.proposal_id = proposal.proposal_id
+        self.fingerprint = proposal.fingerprint
+
+
 @dataclass(frozen=True)
 class GrantConsumeResult:
     success: bool
@@ -62,9 +69,9 @@ class ExecutionGrantStore:
         self._lock = threading.Lock()
         self._records: dict[str, _GrantRecord] = {}
 
-    def _issue_for_session(self, proposal: ActionProposal, session_id: str) -> ExecutionGrant:
-        if not session_id:
-            raise PermissionError("grant_session_required")
+    def _issue_capability(self, proposal: ActionProposal, capability: _ApprovedCapability) -> ExecutionGrant:
+        if capability.proposal_id != proposal.proposal_id or capability.fingerprint != proposal.fingerprint:
+            raise PermissionError("grant_capability_mismatch")
         issued = self.now()
         grant = ExecutionGrant(self.id_factory(), proposal.proposal_id, proposal.fingerprint, issued, issued + self.lifetime)
         with self._lock:
@@ -104,3 +111,18 @@ class ExecutionGrantStore:
                 if record.state is GrantState.ACTIVE:
                     record.state = GrantState.CANCELLED
             self._records.clear()
+
+
+class ExecutionGrantIssuer:
+    """Only the confirmation gate owns the private approval capability."""
+    def __init__(self, store: ExecutionGrantStore):
+        self._store = store
+
+    def issue(self, capability: object, proposal: ActionProposal) -> ExecutionGrant:
+        if not isinstance(capability, _ApprovedCapability):
+            raise PermissionError("grant_capability_required")
+        return self._store._issue_capability(proposal, capability)
+
+    @staticmethod
+    def capability(session_id: str, proposal: ActionProposal) -> object:
+        return _ApprovedCapability(session_id, proposal)

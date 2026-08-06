@@ -172,6 +172,9 @@ class ActionProposal:
     preview: ActionPreview
     reversible: bool
     requires_admin: bool
+    cancellation_support: bool
+    timeout_seconds: float
+    audit_fields: tuple[str, ...]
     verification_method: str
     created_at: datetime
     expires_at: datetime
@@ -240,8 +243,9 @@ class ActionProposalFactory:
         expires = created + self.lifetime
         proposal_id = self.id_factory()
         draft = ActionProposal(proposal_id, task_id, contract.name, contract.version, contract.operation,
-                              contract.side_effect, contract.confirmation, target, frozen, preview,
-                              contract.reversible, contract.requires_admin, contract.verification_method,
+                               contract.side_effect, contract.confirmation, target, frozen, preview,
+                               contract.reversible, contract.requires_admin, contract.cancellation_support,
+                               contract.timeout_seconds, contract.audit_fields, contract.verification_method,
                               created, expires, "")
         return ActionProposal(*[getattr(draft, field.name) if field.name != "fingerprint" else proposal_fingerprint(draft)
                                 for field in fields(draft)])
