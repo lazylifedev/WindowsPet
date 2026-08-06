@@ -48,6 +48,10 @@ def _error(exc: Exception) -> AIClientError:
     return classify_openai_error(exc)
 
 class AIClient:
+    @staticmethod
+    def _raise_if_cancelled(cancel):
+        if cancel is not None and cancel.is_set():
+            raise AIClientError('cancelled', '処理をキャンセルしました。')
     def __init__(self, client=None, timeout: float = 60.0, api_key: str | None = None):
         key = api_key or get_api_key()
         if not key:
@@ -68,6 +72,7 @@ class AIClient:
                 if getattr(event, "type", "") == "response.output_text.delta":
                     delta = getattr(event, "delta", "")
                     if delta:
+                        self._raise_if_cancelled(cancel)
                         parts.append(delta); on_delta(delta)
             return "".join(parts)
         except AIClientError:
@@ -80,25 +85,33 @@ class AIClient:
         seen=set(); inputs=list(history); dispatcher=ToolDispatcher(); calls=0
         try:
             while calls < 3:
+                self._raise_if_cancelled(cancel)
                 response=self.client.responses.create(model=model_name(), instructions=INSTRUCTIONS, input=inputs, tools=self._tools(), store=False)
+                self._raise_if_cancelled(cancel)
                 calls_found=[x for x in getattr(response, 'output', []) if getattr(x, 'type', '') == 'function_call']
                 if not calls_found:
                     text = getattr(response, 'output_text', '') or ''
                     if text:
+                        self._raise_if_cancelled(cancel)
                         on_delta(text)
                     return text
+                self._raise_if_cancelled(cancel)
                 call=calls_found[0]; call_id=getattr(call,'call_id',None); name=getattr(call,'name',None)
                 if not call_id or call_id in seen or name != 'search_files': raise AIClientError('tool', 'この操作にはまだ対応していません。')
                 seen.add(call_id); calls += 1
+                self._raise_if_cancelled(cancel)
                 if on_search_started: on_search_started()
                 result=dispatcher.search_files(getattr(call,'arguments',''), cancel)
+                self._raise_if_cancelled(cancel)
                 request_data = json.loads(getattr(call, 'arguments', '{}')) if isinstance(getattr(call, 'arguments', '{}'), str) else getattr(call, 'arguments', {})
                 result['query'] = request_data.get('query', '')
                 result['root_ids'] = request_data.get('root_ids', [])
                 if result.get('status') == 'cancelled': raise AIClientError('cancelled','ファイル検索をキャンセルしました。')
                 safe=dispatcher.safe_output(result)
+                self._raise_if_cancelled(cancel)
                 if on_search_completed: on_search_completed(result)
                 inputs.extend(getattr(response,'output',[])); inputs.append({'type':'function_call_output','call_id':call_id,'output':json.dumps(safe,ensure_ascii=False)})
+                self._raise_if_cancelled(cancel)
             raise AIClientError('tool_limit','ファイル検索の呼び出し回数が上限に達しました。')
         except AIClientError: raise
         except Exception as exc: raise classify_openai_error(exc) from exc

@@ -248,7 +248,7 @@ class InputBubble(BubbleFrame):
         row=QHBoxLayout(self.card); row.setContentsMargins(8,5,8,5); row.setSpacing(6)
         self.input=MessageEdit(); self.input.setPlaceholderText('メッセージを入力してください'); self.input.setMinimumHeight(MIN_INPUT_HEIGHT-10); self.input.setMaximumHeight(MAX_INPUT_HEIGHT); self.input.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed); self.input.setStyleSheet('QPlainTextEdit{color:white;background:#303641;border:1px solid #596473;border-radius:8px;padding:5px;}')
         self.send_button=QPushButton('➤'); self.send_button.setFixedSize(34,34); self.send_button.setStyleSheet('QPushButton{color:white;background:#4d78b8;border:0;border-radius:8px;}')
-        row.addWidget(self.input); row.addWidget(self.send_button,0,Qt.AlignBottom); self.input.textChanged.connect(self._adjust_input_height); self.input.submit.connect(self.send_message); self.send_button.clicked.connect(self.send_message); self._adjust_input_height()
+        row.addWidget(self.input); row.addWidget(self.send_button,0,Qt.AlignBottom); self.input.textChanged.connect(self._adjust_input_height); self.input.submit.connect(self.send_message); self.send_button.clicked.connect(self._on_primary_button_clicked); self._cancel_requested=False; self._update_primary_button(); self._adjust_input_height()
         self.response=QLabel(''); self.response.hide()
         self.response_bubble=ResponseBubble(self); self.response_bubble.hide(); self._reply_text=''; self._response_generation = 0
         self.input.textChanged.connect(lambda: self.draft_state_changed.emit(bool(self.input.toPlainText().strip())))
@@ -270,12 +270,25 @@ class InputBubble(BubbleFrame):
     def pending(self): return self._pending
     @property
     def search_in_progress(self): return self._search_in_progress
-    def cancel_search(self):
+    @property
+    def cancel_requested(self): return self._cancel_requested
+    def _update_primary_button(self):
+        running = self._pending
+        waiting = self._thread is not None and self._thread.isRunning()
+        self.send_button.setText('■' if running else '➤')
+        self.send_button.setToolTip('処理をキャンセル' if running and not self._cancel_requested else ('キャンセルしています…' if self._cancel_requested else '送信'))
+        self.send_button.setEnabled((running and not self._cancel_requested) or (not running and not waiting))
+    def _on_primary_button_clicked(self):
+        return self.cancel_current_request() if self._pending else self.send_message()
+    def cancel_current_request(self):
+        if not self._pending or self._cancel_requested: return False
         worker = self._worker
-        if worker is not None and hasattr(worker, 'cancel'):
-            worker.cancel()
-            return True
-        return False
+        if worker is None or not hasattr(worker, 'cancel'): return False
+        worker.cancel(); self._cancel_requested=True
+        self._show_response_status('キャンセルしています…'); self._update_primary_button()
+        return True
+    def cancel_search(self):
+        return self.cancel_current_request()
     def show_history(self):
         if not hasattr(self, 'history_window') or self.history_window is None:
             self.history_window = HistoryWindow(self.conversation, clear_callback=self.clear_messages)
@@ -327,12 +340,13 @@ class InputBubble(BubbleFrame):
         return not self._pending and not (self._thread is not None and self._thread.isRunning())
     def _start_request(self, text, *, clear_input):
         if not text or not self._can_start_request(): return False
+        self._cancel_requested=False
         self._reply_text=''; self._search_status_active=False; self.response_pinned=False; self._response_generation += 1
         if clear_input: self.input.clear()
         self._active_user_text=text
         self.conversation.add_user(text); self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking'); self.response_bubble.setText('考え中…'); self._position_response(); self.response_bubble.show()
         self._refresh_history_window()
-        self._thread=QThread(self); self._worker=self._worker_factory(self.conversation.messages()); self._worker.moveToThread(self._thread)
+        self._thread=QThread(self); self._worker=self._worker_factory(self.conversation.messages()); self._worker.moveToThread(self._thread); self._update_primary_button()
         self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.search_started.connect(self._on_search_started); self._worker.search_completed.connect(self._on_search_completed)
         self._worker.finished.connect(self._on_finished); self._worker.failed.connect(self._on_failed); self._worker.finished.connect(self._thread.quit); self._worker.failed.connect(self._thread.quit); self._thread.finished.connect(self._thread_done); self._thread.start(); return True
     def _position_response(self):
@@ -388,7 +402,7 @@ class InputBubble(BubbleFrame):
         self._active_user_text=None
         self.response.setText(message); self.response_bubble.setText(message); self.response_bubble.set_copy_enabled(bool(message.strip())); self.response_bubble.set_actions_enabled(bool(message.strip())); self._position_response(); self._complete()
     def _complete(self):
-        self._pending=False; self._search_in_progress=False; self.send_button.setEnabled(self._thread is None or not self._thread.isRunning()); self.send_finished.emit(); self.pet.play('idle')
+        self._pending=False; self._search_in_progress=False; self._cancel_requested=False; self._update_primary_button(); self.send_finished.emit()
         self._refresh_history_window(refresh_messages=False)
         if not self.response_pinned: self._schedule_response_auto_hide()
     def _schedule_response_auto_hide(self):
@@ -398,13 +412,14 @@ class InputBubble(BubbleFrame):
     def _auto_hide_response(self, generation=None):
         if generation is not None and generation != self._response_generation: return
         if not self._pending and not self.response_pinned:self.response_bubble.hide()
-    def _thread_done(self): self._thread=None; self._worker=None; self.send_button.setEnabled(not self._pending)
+    def _thread_done(self): self._thread=None; self._worker=None; self._cancel_requested=False; self._update_primary_button(); self.pet.play('idle')
     def closeEvent(self,event):
         worker, thread = self._worker, self._thread
         if worker is not None and hasattr(worker, "cancel"): worker.cancel()
         if thread and thread.isRunning(): thread.quit(); thread.wait(2000)
         if thread and not thread.isRunning(): self._thread, self._worker = None, None
         self._retry_text = None
+        self._cancel_requested = False
         if getattr(self, 'history_window', None) is not None: self.history_window.close()
         self.response_bubble.close(); self.closed.emit(); super().closeEvent(event)
 

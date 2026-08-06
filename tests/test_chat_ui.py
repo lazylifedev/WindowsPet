@@ -161,7 +161,7 @@ def test_context_menu_and_history_use_japanese_labels(qapp, tmp_path):
     menu = pet._build_context_menu()
     labels = [action.text() for action in menu.actions() if not action.isSeparator()]
     assert labels == [
-        "OpenAI API 設定", "ファイル検索設定", "最近の検索結果", "検索をキャンセル",
+        "OpenAI API 設定", "ファイル検索設定", "最近の検索結果", "処理をキャンセル",
         "チャットを開く", "チャットを閉じる", "会話履歴", "位置をリセット", "終了",
     ]
     history = HistoryWindow(pet.input_bubble.conversation)
@@ -340,6 +340,20 @@ def test_retry_rejection_preserves_retry_state_and_draft(qapp, monkeypatch):
     assert chat.retry_last_request() is False
     assert chat._retry_text == '質問A' and chat.input.toPlainText() == '次の下書き'
     assert chat.conversation.messages() == before
+    close_chat(chat, qapp)
+
+def test_cancel_current_request_is_single_shot_and_preserves_history(qapp):
+    chat = make_chat(qapp)
+    assert chat.send_button.toolTip() == '送信' and chat.cancel_current_request() is False
+    chat._pending = True; chat._worker = FakeWorker([]); chat._active_user_text = '質問A'
+    chat.conversation.add_user('質問A'); chat._update_primary_button()
+    assert chat.send_button.text() == '■' and chat.cancel_current_request() is True
+    assert chat.cancel_requested and not chat.send_button.isEnabled() and chat.pending
+    assert chat.cancel_current_request() is False and chat._worker.cancelled
+    assert chat.conversation.messages() == [{'role': 'user', 'content': '質問A'}]
+    chat._on_failed('cancelled', '処理をキャンセルしました。')
+    assert not chat.pending and chat._retry_text == '質問A'
+    chat._worker = None
     close_chat(chat, qapp)
 
 
