@@ -5,8 +5,7 @@ import json
 import math
 import re
 import secrets
-import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from types import MappingProxyType
@@ -137,6 +136,28 @@ def validate_contract(contract: ToolContract) -> None:
         raise ValueError("invalid_audit_fields")
 
 
+def validate_preview(preview: ActionPreview, confirmation: ConfirmationType) -> None:
+    required = {
+        ConfirmationType.SIMPLE: (SimpleActionPreview, ("operation", "impact", "button_label")),
+        ConfirmationType.BEFORE_AFTER: (BeforeAfterActionPreview, ("operation", "before", "after", "change_summary", "impact", "button_label")),
+        ConfirmationType.PLAN_IMPACT: (PlanImpactActionPreview, ("purpose", "impact", "rollback_summary", "button_label")),
+        ConfirmationType.EXTERNAL_SEND: (ExternalSendActionPreview, ("recipient", "destination_type", "visibility", "button_label")),
+        ConfirmationType.INSTALLATION: (InstallationActionPreview, ("product_name", "publisher", "package_id", "installation_method", "expected_changes", "button_label")),
+    }
+    if confirmation is ConfirmationType.NONE:
+        return
+    expected, names = required.get(confirmation, (None, ()))
+    if expected is None or type(preview) is not expected:
+        raise ValueError("preview_mismatch")
+    for name in names:
+        if not isinstance(getattr(preview, name), str) or not getattr(preview, name).strip():
+            raise ValueError("invalid_preview")
+    if isinstance(preview, PlanImpactActionPreview) and not preview.steps:
+        raise ValueError("invalid_preview")
+    if isinstance(preview, ExternalSendActionPreview) and any(not item.strip() for item in preview.attachment_display_names):
+        raise ValueError("invalid_preview")
+
+
 @dataclass(frozen=True)
 class ActionProposal:
     proposal_id: str
@@ -179,6 +200,12 @@ def _freeze(value: Any, field: str = "parameters") -> Any:
 
 
 def _jsonable(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return value.value
+    if is_dataclass(value):
+        return {item.name: _jsonable(getattr(value, item.name)) for item in fields(value)}
     if isinstance(value, Mapping):
         return {key: _jsonable(item) for key, item in sorted(value.items())}
     if isinstance(value, tuple):
@@ -187,15 +214,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def proposal_fingerprint(proposal: ActionProposal) -> str:
-    payload = {"task_id": proposal.task_id, "tool": proposal.tool_name, "version": proposal.tool_version,
-               "operation": proposal.operation, "side_effect": proposal.side_effect.value,
-               "confirmation": proposal.confirmation_type.value, "target": proposal.target.__dict__,
-               "parameters": _jsonable(proposal.parameters), "preview": {"operation": proposal.preview.operation,
-               "impact": proposal.preview.impact, "button_label": proposal.preview.button_label,
-               "before": proposal.preview.before, "after": proposal.preview.after,
-               "category": proposal.preview.category.value}, "reversible": proposal.reversible,
-               "requires_admin": proposal.requires_admin, "verification": proposal.verification_method,
-               "created": proposal.created_at.isoformat(), "expires": proposal.expires_at.isoformat()}
+    payload = {field.name: _jsonable(getattr(proposal, field.name)) for field in fields(proposal) if field.name not in ("fingerprint", "proposal_id")}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
 
@@ -213,23 +232,16 @@ class ActionProposalFactory:
         validate_contract(contract)
         if not task_id.strip() or not all(isinstance(value, str) and value.strip() for value in (target.kind, target.identifier, target.display_name)):
             raise ValueError("invalid_target")
-        if not isinstance(preview, ActionPreview) or preview.category is not contract.confirmation:
+        if not isinstance(preview, ActionPreview):
             raise ValueError("preview_mismatch")
+        validate_preview(preview, contract.confirmation)
         frozen = _freeze(dict(parameters))
         created = self.now()
         expires = created + self.lifetime
-        payload = {"task_id": task_id, "tool": contract.name, "version": contract.version,
-                   "operation": contract.operation, "side_effect": contract.side_effect.value,
-                   "confirmation": contract.confirmation.value, "target": target.__dict__,
-                   "parameters": _jsonable(frozen), "preview": {"operation": preview.operation, "impact": preview.impact,
-                   "button_label": preview.button_label, "before": preview.before, "after": preview.after,
-                   "category": preview.category.value},
-                   "reversible": contract.reversible, "requires_admin": contract.requires_admin,
-                   "verification": contract.verification_method, "created": created.isoformat(),
-                   "expires": expires.isoformat()}
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-        fingerprint = hashlib.sha256(encoded).hexdigest()
-        return ActionProposal(self.id_factory(), task_id, contract.name, contract.version, contract.operation,
+        proposal_id = self.id_factory()
+        draft = ActionProposal(proposal_id, task_id, contract.name, contract.version, contract.operation,
                               contract.side_effect, contract.confirmation, target, frozen, preview,
                               contract.reversible, contract.requires_admin, contract.verification_method,
-                              created, expires, fingerprint)
+                              created, expires, "")
+        return ActionProposal(*[getattr(draft, field.name) if field.name != "fingerprint" else proposal_fingerprint(draft)
+                                for field in fields(draft)])

@@ -1,20 +1,21 @@
 from __future__ import annotations
-import threading
+
 import secrets
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from enum import Enum
+from typing import Callable
+
 from .action_models import ActionProposal, ToolContract, proposal_fingerprint
 from .policy_gate import PolicyGate
-from enum import Enum
 
 
-@dataclass(frozen=True)
-class ExecutionGrant:
-    grant_id: str
-    proposal_id: str
-    proposal_fingerprint: str
-    issued_at: datetime
-    expires_at: datetime
+class GrantState(str, Enum):
+    ACTIVE = "active"
+    CONSUMED = "consumed"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
 
 
 class GrantResultCode(str, Enum):
@@ -29,57 +30,77 @@ class GrantResultCode(str, Enum):
 
 
 @dataclass(frozen=True)
+class ExecutionGrant:
+    grant_id: str
+    proposal_id: str
+    proposal_fingerprint: str
+    issued_at: datetime
+    expires_at: datetime
+
+
+@dataclass
+class _GrantRecord:
+    grant: ExecutionGrant
+    state: GrantState = GrantState.ACTIVE
+
+
+@dataclass(frozen=True)
 class GrantConsumeResult:
     success: bool
     reason: GrantResultCode
 
 
 class ExecutionGrantStore:
-    """In-memory, atomic, one-time grant store."""
-    def __init__(self, now=None, lifetime: timedelta = timedelta(seconds=90)):
+    """Non-persistent, atomic grant state store; issuance is capability-gated."""
+
+    def __init__(self, now: Callable[[], datetime] | None = None,
+                 lifetime: timedelta = timedelta(seconds=90), id_factory=None, policy=None):
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.lifetime = lifetime
+        self.id_factory = id_factory or (lambda: secrets.token_urlsafe(24))
+        self.policy = policy or PolicyGate()
         self._lock = threading.Lock()
-        self._grants: dict[str, ExecutionGrant] = {}
-        self._used: set[str] = set()
-        self._cancelled: set[str] = set()
+        self._records: dict[str, _GrantRecord] = {}
 
-    def _issue(self, proposal: ActionProposal) -> ExecutionGrant:
+    def _issue_for_session(self, proposal: ActionProposal, session_id: str) -> ExecutionGrant:
+        if not session_id:
+            raise PermissionError("grant_session_required")
+        issued = self.now()
+        grant = ExecutionGrant(self.id_factory(), proposal.proposal_id, proposal.fingerprint, issued, issued + self.lifetime)
         with self._lock:
-            issued = self.now()
-            grant = ExecutionGrant(secrets.token_urlsafe(24), proposal.proposal_id, proposal.fingerprint, issued, issued + self.lifetime)
-            self._grants[grant.grant_id] = grant
-            return grant
+            self._records[grant.grant_id] = _GrantRecord(grant)
+        return grant
 
-    def issue(self, proposal: ActionProposal) -> ExecutionGrant:
+    def issue(self, proposal: ActionProposal):
         raise PermissionError("grant_issue_requires_confirmation")
-
-    def consume(self, grant_id: str, proposal: ActionProposal) -> bool:
-        with self._lock:
-            grant = self._grants.get(grant_id)
-            if grant is None or grant_id in self._used or self.now() >= grant.expires_at: return False
-            if grant.proposal_id != proposal.proposal_id or grant.proposal_fingerprint != proposal.fingerprint: return False
-            self._used.add(grant_id)
-            return True
 
     def consume_for(self, grant_id: str, contract: ToolContract, proposal: ActionProposal) -> GrantConsumeResult:
         with self._lock:
-            grant = self._grants.get(grant_id)
-            if grant is None: return GrantConsumeResult(False, GrantResultCode.NOT_FOUND)
-            if grant_id in self._cancelled: return GrantConsumeResult(False, GrantResultCode.CANCELLED)
-            if grant_id in self._used: return GrantConsumeResult(False, GrantResultCode.ALREADY_USED)
-            if self.now() >= grant.expires_at: return GrantConsumeResult(False, GrantResultCode.EXPIRED)
-            if grant.proposal_id != proposal.proposal_id: return GrantConsumeResult(False, GrantResultCode.PROPOSAL_MISMATCH)
-            if grant.proposal_fingerprint != proposal.fingerprint or proposal.fingerprint != proposal_fingerprint(proposal): return GrantConsumeResult(False, GrantResultCode.FINGERPRINT_MISMATCH)
-            if PolicyGate().evaluate(contract, proposal).decision.value != "require_confirmation": return GrantConsumeResult(False, GrantResultCode.POLICY_DENIED)
-            self._used.add(grant_id)
+            record = self._records.get(grant_id)
+            if record is None: return GrantConsumeResult(False, GrantResultCode.NOT_FOUND)
+            if record.state is GrantState.CANCELLED: return GrantConsumeResult(False, GrantResultCode.CANCELLED)
+            if record.state is GrantState.CONSUMED: return GrantConsumeResult(False, GrantResultCode.ALREADY_USED)
+            if self.now() >= record.grant.expires_at:
+                record.state = GrantState.EXPIRED
+                return GrantConsumeResult(False, GrantResultCode.EXPIRED)
+            if record.grant.proposal_id != proposal.proposal_id: return GrantConsumeResult(False, GrantResultCode.PROPOSAL_MISMATCH)
+            if record.grant.proposal_fingerprint != proposal.fingerprint or proposal.fingerprint != proposal_fingerprint(proposal): return GrantConsumeResult(False, GrantResultCode.FINGERPRINT_MISMATCH)
+            if self.policy.evaluate(contract, proposal).decision.value != "require_confirmation": return GrantConsumeResult(False, GrantResultCode.POLICY_DENIED)
+            record.state = GrantState.CONSUMED
             return GrantConsumeResult(True, GrantResultCode.CONSUMED)
 
-    def cancel(self, grant_id: str) -> None:
+    def cancel(self, grant_id: str) -> GrantResultCode:
         with self._lock:
-            if grant_id in self._grants and grant_id not in self._used:
-                self._cancelled.add(grant_id)
+            record = self._records.get(grant_id)
+            if record is None: return GrantResultCode.NOT_FOUND
+            if record.state is GrantState.ACTIVE:
+                record.state = GrantState.CANCELLED
+                return GrantResultCode.CANCELLED
+            return GrantResultCode.ALREADY_USED if record.state is GrantState.CONSUMED else GrantResultCode.EXPIRED
 
     def clear(self) -> None:
         with self._lock:
-            self._grants.clear(); self._used.clear(); self._cancelled.clear()
+            for record in self._records.values():
+                if record.state is GrantState.ACTIVE:
+                    record.state = GrantState.CANCELLED
+            self._records.clear()

@@ -12,7 +12,7 @@ from windows_pet.confirmation_gate import ConfirmationGate
 def make(side=SideEffect.APPLICATION_LAUNCH, confirmation=ConfirmationType.SIMPLE, now=None):
     contract = ToolContract("fake", "1", "inspect", side, confirmation, True, False, True, 2, "verify")
     target = ActionTarget("application", "FAKE_TARGET", "Fake app")
-    preview = ActionPreview("inspect", "Fake impact", "Allow", category=confirmation)
+    preview = SimpleActionPreview("inspect", "Fake impact", "Allow")
     proposal = ActionProposalFactory(now=now or (lambda: datetime.now(timezone.utc))).create(contract, "task", target, {"path": "FAKE_PATH"}, preview)
     return contract, proposal
 
@@ -29,7 +29,7 @@ def test_proposal_is_immutable_and_canonical():
 
 def test_sensitive_and_invalid_parameters_rejected():
     contract, target = make()[0], ActionTarget("file", "x", "x")
-    preview = ActionPreview("x", "x", "Allow")
+    preview = SimpleActionPreview("x", "x", "Allow")
     with pytest.raises(ValueError, match="sensitive_parameter"):
         ActionProposalFactory().create(contract, "t", target, {"api_key": "FAKE_SECRET_VALUE"}, preview)
     with pytest.raises(ValueError):
@@ -48,8 +48,8 @@ def test_grant_is_single_use_and_fingerprint_bound():
     gate = ConfirmationGate(); _, session = gate.prepare(contract, proposal)
     grant = gate.decide(contract, proposal, ConfirmationDecision.APPROVE, session.session_id)
     store = gate.grants
-    assert store.consume(grant.grant_id, proposal)
-    assert not store.consume(grant.grant_id, proposal)
+    assert store.consume_for(grant.grant_id, contract, proposal).success
+    assert not store.consume_for(grant.grant_id, contract, proposal).success
 
 
 def test_concurrent_grant_consume_has_one_success():
@@ -58,7 +58,7 @@ def test_concurrent_grant_consume_has_one_success():
     grant = gate.decide(contract, proposal, ConfirmationDecision.APPROVE, session.session_id)
     store = gate.grants
     with ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(pool.map(lambda _: store.consume(grant.grant_id, proposal), range(8)))
+        results = list(pool.map(lambda _: store.consume_for(grant.grant_id, contract, proposal).success, range(8)))
     assert sum(results) == 1
 
 

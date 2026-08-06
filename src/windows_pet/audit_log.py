@@ -5,6 +5,25 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
+from enum import Enum
+
+
+class AuditEventType(str, Enum):
+    PROPOSAL_CREATED = "proposal_created"
+    POLICY_ALLOWED_READ_ONLY = "policy_allowed_read_only"
+    POLICY_CONFIRMATION_REQUIRED = "policy_confirmation_required"
+    POLICY_DENIED = "policy_denied"
+    CONFIRMATION_SHOWN = "confirmation_shown"
+    CONFIRMATION_APPROVED = "confirmation_approved"
+    CONFIRMATION_CANCELLED = "confirmation_cancelled"
+    CONFIRMATION_CLOSED = "confirmation_closed"
+    CONFIRMATION_REVISE_REQUESTED = "confirmation_revise_requested"
+    GRANT_ISSUED = "grant_issued"
+    GRANT_CONSUMED = "grant_consumed"
+    GRANT_REJECTED = "grant_rejected"
+    GRANT_EXPIRED = "grant_expired"
+    GRANT_CANCELLED = "grant_cancelled"
+    AUDIT_WRITE_FAILED = "audit_write_failed"
 
 
 @dataclass(frozen=True)
@@ -24,6 +43,10 @@ class AuditEvent:
     reversible: bool = False
     timestamp: str = ""
 
+    def __post_init__(self):
+        if self.event_type not in {item.value for item in AuditEventType}:
+            raise ValueError("invalid_audit_event")
+
 
 class AuditSink(Protocol):
     def write(self, event: AuditEvent) -> None: ...
@@ -32,15 +55,22 @@ class AuditSink(Protocol):
 class InMemoryAuditSink:
     def __init__(self) -> None:
         self.events: list[AuditEvent] = []
+        self._lock = threading.Lock()
     def write(self, event: AuditEvent) -> None:
-        self.events.append(event)
+        with self._lock:
+            self.events.append(event)
+
+
+class NullAuditSink:
+    def write(self, event: AuditEvent) -> bool:
+        return True
 
 
 class JsonlAuditSink:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.Lock()
-    def write(self, event: AuditEvent) -> None:
+    def write(self, event: AuditEvent) -> bool:
         record = {key: value for key, value in event.__dict__.items() if value != ""}
         record.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
         try:
@@ -50,4 +80,5 @@ class JsonlAuditSink:
                     stream.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
                     stream.flush()
         except OSError:
-            return
+            return False
+        return True
