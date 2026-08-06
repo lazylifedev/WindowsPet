@@ -11,6 +11,7 @@ from .conversation import Conversation
 MIN_INPUT_HEIGHT, MAX_INPUT_HEIGHT = 52, 140
 TAIL_WIDTH, TAIL_HEIGHT = 14, 18
 SHADOW_BLUR, SHADOW_OFFSET_Y = 12, 3
+RESPONSE_GAP = 4
 
 def chat_position(pet_rect: QRect, available: QRect, size=(280, MIN_INPUT_HEIGHT)) -> QPoint:
     width, height = size
@@ -34,7 +35,7 @@ def chat_position(pet_rect: QRect, available: QRect, size=(280, MIN_INPUT_HEIGHT
 def response_position(pet_rect: QRect, available: QRect, size) -> QPoint:
     width, height = (size.width(), size.height()) if hasattr(size, "width") else size
     x = pet_rect.center().x() - width // 2
-    y = pet_rect.top() - height - 8
+    y = pet_rect.top() - height - RESPONSE_GAP
     if y < available.top():
         y = pet_rect.bottom() + 1 + 8
     return QPoint(min(max(x, available.left()), available.right() - width + 1),
@@ -111,7 +112,7 @@ class InputBubble(BubbleFrame):
         shadow=QGraphicsDropShadowEffect(self.card); shadow.setBlurRadius(SHADOW_BLUR); shadow.setOffset(0, SHADOW_OFFSET_Y); shadow.setColor(QColor(0,0,0,70)); self.card.setGraphicsEffect(shadow)
         outer=QVBoxLayout(self); outer.setContentsMargins(SHADOW_BLUR, TAIL_HEIGHT+SHADOW_BLUR, SHADOW_BLUR, SHADOW_BLUR+SHADOW_OFFSET_Y); outer.setSpacing(0); outer.addWidget(self.card)
         row=QHBoxLayout(self.card); row.setContentsMargins(8,5,8,5); row.setSpacing(6)
-        self.input=MessageEdit(); self.input.setPlaceholderText('Type a message...'); self.input.setMinimumHeight(MIN_INPUT_HEIGHT-10); self.input.setMaximumHeight(MAX_INPUT_HEIGHT); self.input.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed); self.input.setStyleSheet('QPlainTextEdit{color:white;background:#303641;border:1px solid #596473;border-radius:8px;padding:5px;}')
+        self.input=MessageEdit(); self.input.setPlaceholderText('メッセージを入力してください'); self.input.setMinimumHeight(MIN_INPUT_HEIGHT-10); self.input.setMaximumHeight(MAX_INPUT_HEIGHT); self.input.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed); self.input.setStyleSheet('QPlainTextEdit{color:white;background:#303641;border:1px solid #596473;border-radius:8px;padding:5px;}')
         self.send_button=QPushButton('➤'); self.send_button.setFixedSize(34,34); self.send_button.setStyleSheet('QPushButton{color:white;background:#4d78b8;border:0;border-radius:8px;}')
         row.addWidget(self.input); row.addWidget(self.send_button,0,Qt.AlignBottom); self.input.textChanged.connect(self._adjust_input_height); self.input.submit.connect(self.send_message); self.send_button.clicked.connect(self.send_message); self._adjust_input_height()
         self.response=QLabel(''); self.response.hide()

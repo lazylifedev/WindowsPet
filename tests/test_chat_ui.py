@@ -24,6 +24,7 @@ def make_chat(qapp):
 def test_bubbles_and_input_keyboard_contract(qapp):
     chat = make_chat(qapp)
     assert not chat.response.isVisible() and chat.input.isVisible()
+    assert chat.input.placeholderText() == "メッセージを入力してください"
     chat.input.setPlainText("draft")
     assert chat.input.toPlainText() == "draft"
     event = QKeyEvent(QEvent.KeyPress, Qt.Key_Return, Qt.NoModifier)
@@ -106,7 +107,8 @@ def test_position_spec_edges_and_api_error_mapping(monkeypatch):
     assert chat_position(QRect(0, 300, 100, 100), screen, (280, 100)).x() == 0
     assert chat_position(QRect(900, 300, 100, 100), screen, (280, 100)).x() == 720
     response = response_position(QRect(400, 300, 100, 100), screen, (280, 100))
-    assert response.y() < 300
+    assert response.y() == 296 - 100
+    assert 300 - (response.y() + 100) == 4
     assert response_position(QRect(400, 0, 100, 100), screen, (280, 100)).y() > 100
     assert _error(RuntimeError("401 unauthorized")).kind == "auth"
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
