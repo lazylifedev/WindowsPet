@@ -2,13 +2,28 @@ import json
 import sys
 import pytest
 from pathlib import Path
-from PySide6.QtCore import QPoint, QRect
+from PySide6.QtCore import QPoint, QRect, QObject, Signal
 from windows_pet.storage import constrain_to_primary, load_position, save_position
 from windows_pet.animation import load_animations
 from windows_pet.paths import resource_path
 from windows_pet.chat_bubble import ChatBubble, chat_position
 
 ROOT = Path(__file__).parents[1]
+
+
+class FakeWorker(QObject):
+    delta = Signal(str)
+    finished = Signal(str)
+    failed = Signal(str, str)
+    search_started = Signal()
+    search_completed = Signal(dict)
+
+    def __init__(self, history):
+        super().__init__(); self.cancelled = False
+
+    def cancel(self): self.cancelled = True
+
+    def run(self): self.finished.emit("fake response")
 def test_manifest_and_variable_frame_counts(qapp):
     animations = load_animations(ROOT / 'assets' / 'animations')
     assert len(animations['idle'].frames) == 4
@@ -48,11 +63,12 @@ def test_chat_rejects_blank_and_blocks_duplicate(qapp):
     class Pet:
         def __init__(self): self.plays = []
         def play(self, name): self.plays.append(name)
-    pet = Pet(); chat = ChatBubble(pet)
+    pet = Pet(); chat = ChatBubble(pet, worker_factory=FakeWorker)
     chat.input.setPlainText("  \n")
     assert chat.send_message() is False and not chat.pending
     chat.input.setPlainText("hello")
     assert chat.send_message() is True and chat.pending
     assert chat.send_message() is False
     assert pet.plays == ["thinking"]
-    chat.close()
+    chat.close(); qapp.processEvents()
+    assert chat._thread is None and chat._worker is None

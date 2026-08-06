@@ -123,8 +123,8 @@ class InputBubble(BubbleFrame):
     focus_state_changed = Signal(bool)
     draft_state_changed = Signal(bool)
     closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict)
-    def __init__(self, pet):
-        super().__init__(); self.pet=pet; self._pending=False; self._search_in_progress=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False
+    def __init__(self, pet, worker_factory=AIWorker):
+        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self._pending=False; self._search_in_progress=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.card=QFrame(self); self.card.setStyleSheet('QFrame{background:#20242b;border:0;}')
         # A layered top-level window must never receive an effect whose expanded
@@ -181,7 +181,7 @@ class InputBubble(BubbleFrame):
         if not text:return False
         self._reply_text=''
         self.input.clear(); self.conversation.add_user(text); self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking'); self.response_bubble.setText('考え中…'); self._position_response(); self.response_bubble.show()
-        self._thread=QThread(self); self._worker=AIWorker(self.conversation.messages()); self._worker.moveToThread(self._thread)
+        self._thread=QThread(self); self._worker=self._worker_factory(self.conversation.messages()); self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.search_started.connect(self._on_search_started); self._worker.search_completed.connect(self._on_search_completed)
         self._worker.finished.connect(self._on_finished); self._worker.failed.connect(self._on_failed); self._worker.finished.connect(self._thread.quit); self._worker.failed.connect(self._thread.quit); self._thread.finished.connect(self._thread_done); self._thread.start(); return True
     def _position_response(self):
@@ -216,7 +216,10 @@ class InputBubble(BubbleFrame):
         if not self._pending and not self.response_pinned:self.response_bubble.hide()
     def _thread_done(self): self._thread=None; self._worker=None
     def closeEvent(self,event):
-        if self._thread and self._thread.isRunning(): self._thread.quit(); self._thread.wait(2000)
+        worker, thread = self._worker, self._thread
+        if worker is not None and hasattr(worker, "cancel"): worker.cancel()
+        if thread and thread.isRunning(): thread.quit(); thread.wait(2000)
+        if thread and not thread.isRunning(): self._thread, self._worker = None, None
         self.response_bubble.close(); self.closed.emit(); super().closeEvent(event)
 
 ChatBubble = InputBubble

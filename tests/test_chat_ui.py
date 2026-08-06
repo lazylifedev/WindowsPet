@@ -4,7 +4,7 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt
 from PySide6.QtGui import QEnterEvent, QFocusEvent, QKeyEvent, QPaintEvent
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, QObject, Signal
 from PySide6.QtWidgets import QWidget
 
 from windows_pet.ai_client import AIClient, AIClientError, _error
@@ -18,8 +18,28 @@ class Pet:
     def play(self, name): self.plays.append(name)
 
 
+class FakeWorker(QObject):
+    delta = Signal(str)
+    finished = Signal(str)
+    failed = Signal(str, str)
+    search_started = Signal()
+    search_completed = Signal(dict)
+
+    def __init__(self, history):
+        super().__init__(); self.cancelled = False
+
+    def cancel(self): self.cancelled = True
+
+    def run(self): self.finished.emit("fake response")
+
+
 def make_chat(qapp):
-    chat = ChatBubble(Pet()); chat.show(); qapp.processEvents(); return chat
+    chat = ChatBubble(Pet(), worker_factory=FakeWorker); chat.show(); qapp.processEvents(); return chat
+
+
+def close_chat(chat, qapp):
+    chat.close(); qapp.processEvents()
+    assert chat._thread is None and chat._worker is None
 
 
 def test_bubbles_and_input_keyboard_contract(qapp):
@@ -59,7 +79,7 @@ def test_duplicate_send_is_blocked_and_response_streams(qapp):
     assert chat.response.text() == "hello"
     chat._on_finished("hello there")
     assert not chat.pending and chat.conversation.messages()[-1]["role"] == "assistant"
-    chat.close()
+    close_chat(chat, qapp)
 
 def test_search_state_only_enables_search_cancel(qapp):
     chat = make_chat(qapp)
@@ -67,13 +87,13 @@ def test_search_state_only_enables_search_cancel(qapp):
     chat._on_search_started(); assert chat.search_in_progress
     chat._on_search_completed({}); assert not chat.search_in_progress
     chat._on_finished("done"); assert chat.send_button.isEnabled()
-    chat.close()
+    close_chat(chat, qapp)
 
 def test_failed_request_resets_search_state_and_input(qapp):
     chat = make_chat(qapp); chat._on_search_started(); assert chat.search_in_progress
     chat._on_failed("network", "接続できませんでした")
     assert not chat.search_in_progress and chat.send_button.isEnabled() and not chat.pending
-    chat.close()
+    close_chat(chat, qapp)
 
 
 def test_clear_is_blocked_during_request_and_history_reflects_conversation(qapp):
@@ -83,14 +103,14 @@ def test_clear_is_blocked_during_request_and_history_reflects_conversation(qapp)
     chat.conversation.add_user("new"); chat.conversation.add_assistant("reply")
     history = HistoryWindow(chat.conversation); history.show(); qapp.processEvents()
     assert "new" in [w.text() for w in history.findChildren(type(chat.response))]
-    history.close(); chat.close()
+    history.close(); close_chat(chat, qapp)
 
 
 def test_response_auto_hide_and_pinned(monkeypatch, qapp):
     timers = []
     monkeypatch.setattr("windows_pet.chat_bubble.QTimer.singleShot", lambda ms, fn: timers.append(fn))
     chat = make_chat(qapp); chat._complete(); assert timers; timers.pop()(); assert not chat.response.isVisible()
-    chat.response.show(); chat.set_response_pinned(True); chat._complete(); assert not timers; assert chat.response.isVisible(); chat.close()
+    chat.response.show(); chat.set_response_pinned(True); chat._complete(); assert not timers; assert chat.response.isVisible(); close_chat(chat, qapp)
 
 def test_input_height_contract_and_reset(qapp):
     chat = make_chat(qapp)
@@ -100,7 +120,7 @@ def test_input_height_contract_and_reset(qapp):
     chat.input.setPlainText("\n".join(["line"] * 40)); qapp.processEvents()
     assert grown > 48 and chat.input.height() <= 130
     chat.input.clear(); qapp.processEvents(); assert 48 <= chat.input.height() <= 50
-    chat.close()
+    close_chat(chat, qapp)
 
 def test_input_event_filter_handles_focus_and_non_focus_events(qapp):
     chat = make_chat(qapp)
@@ -116,7 +136,7 @@ def test_input_event_filter_handles_focus_and_non_focus_events(qapp):
     assert states == [True, False]
     chat.eventFilter(other, QFocusEvent(QEvent.Type.FocusIn))
     assert states == [True, False]
-    other.deleteLater(); chat.close()
+    other.deleteLater(); close_chat(chat, qapp)
 
 def test_response_empty_and_simultaneous_bubbles_are_safe(qapp):
     chat = make_chat(qapp)
@@ -124,7 +144,7 @@ def test_response_empty_and_simultaneous_bubbles_are_safe(qapp):
     assert chat.response_bubble.y() + chat.response_bubble.height() <= qapp.primaryScreen().availableGeometry().bottom() + 1
     chat._on_finished("")
     assert not chat.response_bubble.isVisible()
-    chat.close()
+    close_chat(chat, qapp)
 
 
 def test_position_spec_edges_and_api_error_mapping(monkeypatch):
@@ -160,7 +180,7 @@ def test_response_position_is_centered_for_short_and_long_text(qapp):
         assert pet.frameGeometry().top() - (chat.response_bubble.y() + chat.response_bubble.panel_bottom_local_y()) == 3
         assert chat.response_bubble._tail_direction == "bottom"
         assert chat.response_bubble._tail_x == pet.frameGeometry().center().x() - chat.response_bubble.x()
-    chat.close()
+    close_chat(chat, qapp)
 
 def test_response_stream_repositions_after_each_resize_and_clamps_edges(qapp):
     chat = make_chat(qapp)
@@ -173,7 +193,7 @@ def test_response_stream_repositions_after_each_resize_and_clamps_edges(qapp):
         assert chat.response_bubble._tail_x == max(9, min(chat.response_bubble.width() - 9, rect.center().x() - chat.response_bubble.x()))
         old_x = chat.response_bubble.x(); chat._on_delta("長い回答です。" * 30)
         assert chat.response_bubble.x() != old_x or chat.response_bubble.width() >= 90
-    chat.close()
+    close_chat(chat, qapp)
 
 def test_input_position_is_centered_below_and_tail_is_clamped(qapp):
     chat = make_chat(qapp)
@@ -188,7 +208,7 @@ def test_input_position_is_centered_below_and_tail_is_clamped(qapp):
     assert chat._tail_x == 9
     chat.set_tail_x(10000)
     assert chat._tail_x == chat.width() - 9
-    chat.close()
+    close_chat(chat, qapp)
 
 
 def test_pyinstaller_spec_includes_package_modules():
