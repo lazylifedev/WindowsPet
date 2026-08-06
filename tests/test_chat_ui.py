@@ -323,6 +323,25 @@ def test_new_send_clears_pin_but_rejected_send_does_not(qapp):
     assert chat.send_message() is False and chat.response_pinned is False
     close_chat(chat, qapp)
 
+def test_retry_consumes_only_after_success_and_preserves_draft(qapp, monkeypatch):
+    chat = make_chat(qapp)
+    chat._retry_text = '質問A'; chat.input.setPlainText('次の下書き')
+    calls = []
+    monkeypatch.setattr(chat, '_start_request', lambda text, clear_input: calls.append((text, clear_input)) or True)
+    assert chat.retry_last_request() is True
+    assert chat._retry_text is None and chat.input.toPlainText() == '次の下書き'
+    assert calls == [('質問A', False)]
+    close_chat(chat, qapp)
+
+def test_retry_rejection_preserves_retry_state_and_draft(qapp, monkeypatch):
+    chat = make_chat(qapp)
+    chat._retry_text = '質問A'; chat.input.setPlainText('次の下書き'); chat._pending = True
+    before = chat.conversation.messages()
+    assert chat.retry_last_request() is False
+    assert chat._retry_text == '質問A' and chat.input.toPlainText() == '次の下書き'
+    assert chat.conversation.messages() == before
+    close_chat(chat, qapp)
+
 
 def test_unpin_schedules_hide_and_repin_invalidates_old_timer(monkeypatch, qapp):
     timers = []
