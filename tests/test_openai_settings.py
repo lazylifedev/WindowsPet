@@ -1,8 +1,10 @@
 from types import SimpleNamespace
 import json
 import pytest
+import httpx
+from openai import APIConnectionError, APITimeoutError, AuthenticationError, BadRequestError, InternalServerError, NotFoundError, PermissionDeniedError, RateLimitError
 
-from windows_pet.ai_client import AIClient, AIClientError
+from windows_pet.ai_client import AIClient, AIClientError, classify_openai_error
 from windows_pet.openai_credentials import delete_api_key, get_api_key, has_environment_key, save_api_key
 
 class FakeKeyring:
@@ -63,3 +65,28 @@ def test_ai_client_request_does_not_include_api_key(monkeypatch):
     client = AIClient(SimpleNamespace(responses=Responses()), api_key="dummy")
     client.stream([], lambda _: None)
     payload = repr(calls[0]); assert "dummy" not in payload
+
+def _sdk_error(error_type, status, body=None):
+    response = httpx.Response(status, request=httpx.Request("POST", "https://api.openai.com/v1/responses"))
+    if error_type in (APITimeoutError,): return error_type(httpx.Request("POST", "https://api.openai.com"))
+    if error_type is APIConnectionError: return error_type(request=httpx.Request("POST", "https://api.openai.com"))
+    return error_type("test", response=response, body=body)
+
+@pytest.mark.parametrize("error_type,status,body,kind,text", [
+    (AuthenticationError, 401, None, "auth", "APIキー"),
+    (PermissionDeniedError, 403, None, "permission", "権限"),
+    (RateLimitError, 429, {"code": "insufficient_quota"}, "quota", "利用上限"),
+    (RateLimitError, 429, {"error": {"code": "rate_limit_exceeded"}}, "rate_limit", "集中"),
+    (APITimeoutError, None, None, "timeout", "時間内"),
+    (APIConnectionError, None, None, "network", "ネットワーク"),
+    (BadRequestError, 400, None, "bad_request", "リクエスト"),
+    (NotFoundError, 404, None, "model", "モデル"),
+    (InternalServerError, 500, None, "server", "障害"),
+])
+def test_openai_sdk_error_classification(error_type, status, body, kind, text):
+    error = classify_openai_error(_sdk_error(error_type, status, body))
+    assert error.kind == kind and text in str(error)
+
+def test_unknown_error_classification_is_safe():
+    error = classify_openai_error(RuntimeError("private response details"))
+    assert error.kind == "unknown" and "private response" not in str(error)

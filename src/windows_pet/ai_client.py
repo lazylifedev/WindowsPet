@@ -4,7 +4,8 @@ import os
 import json
 from collections.abc import Callable, Iterable
 
-from openai import OpenAI
+from openai import OpenAI, APIConnectionError, APIStatusError, APITimeoutError, BadRequestError
+from openai import AuthenticationError, InternalServerError, NotFoundError, PermissionDeniedError, RateLimitError
 from .file_search_models import SearchRequest
 from .file_search_service import FileSearchService
 from .file_search_settings import SearchSettings
@@ -25,18 +26,26 @@ class AIClientError(RuntimeError):
 def model_name() -> str:
     return os.getenv("WINDOWS_PET_MODEL", "gpt-5-mini")
 
+def classify_openai_error(exc: Exception) -> AIClientError:
+    body = getattr(exc, "body", None); code = None
+    if isinstance(body, dict):
+        error = body.get("error"); code = error.get("code") if isinstance(error, dict) else body.get("code")
+    status = getattr(exc, "status_code", None)
+    if isinstance(exc, AuthenticationError) or status == 401: return AIClientError("auth", "OpenAI APIキーが正しくないか、無効になっています。")
+    if isinstance(exc, PermissionDeniedError) or status == 403: return AIClientError("permission", "このOpenAI APIキーには必要な利用権限がありません。")
+    if isinstance(exc, RateLimitError): return AIClientError("quota" if code == "insufficient_quota" else "rate_limit", "OpenAI APIの利用上限に達しています。請求設定を確認する必要があります。" if code == "insufficient_quota" else "短時間にリクエストが集中しました。少し時間をおいて再試行してください。")
+    if isinstance(exc, APITimeoutError): return AIClientError("timeout", "OpenAI APIから時間内に応答がありませんでした。")
+    if isinstance(exc, APIConnectionError): return AIClientError("network", "ネットワークに接続できないか、OpenAI APIへ到達できませんでした。")
+    if isinstance(exc, BadRequestError) or status == 400: return AIClientError("bad_request", "OpenAI APIへのリクエストを受け付けられませんでした。")
+    if isinstance(exc, NotFoundError) or status == 404: return AIClientError("model", "設定されているAIモデルを利用できません。")
+    if isinstance(exc, InternalServerError) or (isinstance(exc, APIStatusError) and isinstance(status, int) and status >= 500): return AIClientError("server", "OpenAI APIで一時的な障害が発生しています。少し時間をおいて再試行してください。")
+    return AIClientError("unknown", "OpenAI APIとの通信中にエラーが発生しました。")
+
 def _error(exc: Exception) -> AIClientError:
-    name = type(exc).__name__.lower()
+    """Legacy adapter; production paths use classify_openai_error directly."""
     text = str(exc).lower()
-    if "authentication" in name or "api key" in text or "401" in text:
-        return AIClientError("auth", "OpenAI APIキーが正しくないか、利用できません。")
-    if "rate" in name or "quota" in text or "429" in text:
-        return AIClientError("rate_limit", "OpenAI APIの利用上限またはレート制限に達しました。")
-    if "timeout" in name or "timed out" in text:
-        return AIClientError("timeout", "AIからの応答が時間内に返りませんでした。")
-    if "connection" in name or "connect" in text:
-        return AIClientError("network", "OpenAI APIへ接続できませんでした。")
-    return AIClientError("server", "OpenAI APIで一時的なエラーが発生しました。")
+    if "401" in text or "api key" in text: return AIClientError("auth", "OpenAI APIキーが正しくないか、無効になっています。")
+    return classify_openai_error(exc)
 
 class AIClient:
     def __init__(self, client=None, timeout: float = 60.0, api_key: str | None = None):
@@ -64,7 +73,7 @@ class AIClient:
         except AIClientError:
             raise
         except Exception as exc:
-            raise _error(exc) from exc
+            raise classify_openai_error(exc) from exc
 
     def stream_with_tools(self, history, on_delta, on_search_started=None, on_search_completed=None, cancel=None) -> str:
         """Run the public Responses API tool loop; full paths never enter API input."""
@@ -92,7 +101,7 @@ class AIClient:
                 inputs.extend(getattr(response,'output',[])); inputs.append({'type':'function_call_output','call_id':call_id,'output':json.dumps(safe,ensure_ascii=False)})
             raise AIClientError('tool_limit','ファイル検索の呼び出し回数が上限に達しました。')
         except AIClientError: raise
-        except Exception as exc: raise _error(exc) from exc
+        except Exception as exc: raise classify_openai_error(exc) from exc
 
     def _tools(self):
         return [{"type":"function","name":"search_files","description":"許可済みフォルダーを読み取り専用で検索します。ファイル本文は検索しません。","parameters":{"type":"object","properties":{"query":{"type":"string"},"root_ids":{"type":"array","items":{"type":"string"}},"extensions":{"type":"array","items":{"type":"string"}},"modified_after":{"type":["string","null"]},"modified_before":{"type":["string","null"]},"min_size_bytes":{"type":["integer","null"]},"max_size_bytes":{"type":["integer","null"]},"include_directories":{"type":"boolean"},"max_results":{"type":"integer"}},"required":["query","root_ids","extensions","modified_after","modified_before","min_size_bytes","max_size_bytes","include_directories","max_results"],"additionalProperties":False},"strict":True}]

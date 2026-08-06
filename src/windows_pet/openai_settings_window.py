@@ -3,6 +3,7 @@ from PySide6.QtCore import QThread, Signal, QObject, Slot
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QLineEdit, QMessageBox, QPushButton, QVBoxLayout, QLabel
 from openai import OpenAI
 from .openai_credentials import delete_api_key, get_api_key, has_environment_key, save_api_key
+from .ai_client import classify_openai_error
 
 class _CheckWorker(QObject):
     finished = Signal(bool, str)
@@ -12,7 +13,7 @@ class _CheckWorker(QObject):
         try:
             OpenAI(api_key=self.key, timeout=15, max_retries=0).responses.create(model="gpt-5-mini", input="Reply with OK.", store=False)
             self.finished.emit(True, "OpenAI API に接続できました。")
-        except Exception: self.finished.emit(False, "OpenAI API に接続できませんでした。")
+        except Exception as exc: self.finished.emit(False, classify_openai_error(exc).args[0])
 
 class OpenAISettingsWindow(QDialog):
     def __init__(self, parent=None):
@@ -36,7 +37,7 @@ class OpenAISettingsWindow(QDialog):
     def check_connection(self):
         key = self.key.text().strip() or get_api_key()
         if not key: self.status.setText("API キーを設定してください。"); return
-        self.check.setEnabled(False); self.status.setText("確認中…"); generation = self._closed_generation; self.thread = QThread(self); self.worker = _CheckWorker(key); self.worker.moveToThread(self.thread); self.thread.started.connect(self.worker.run); self.worker.finished.connect(lambda ok, text: self._checked(generation, ok, text)); self.worker.finished.connect(self.thread.quit); self.thread.finished.connect(self.thread.deleteLater); self.thread.start()
+        self.check.setEnabled(False); self.status.setText("確認中…"); generation = self._closed_generation; self.thread = QThread(self); self.worker = _CheckWorker(key); self.worker.moveToThread(self.thread); self.thread.started.connect(self.worker.run); self.worker.finished.connect(lambda ok, text: self._checked(generation, ok, text)); self.worker.finished.connect(self.worker.deleteLater); self.worker.finished.connect(self.thread.quit); self.thread.finished.connect(self.thread.deleteLater); self.thread.start()
     def _checked(self, generation, ok, text):
         if generation != self._closed_generation or not self.isVisible(): return
         self.check.setEnabled(True); self.status.setText(text)
