@@ -126,6 +126,12 @@ class LocalInspectionService:
     def search(snapshot: InspectionSnapshot, query: str, limit: int = 25) -> list[AppCandidate]:
         q = _norm(query).casefold()
         if not q or limit <= 0: return []
+        path_match = shutil.which(q)
+        existing_names = {_norm(item.display_name).casefold() for item in snapshot.app_paths + snapshot.start_menu + snapshot.installed_apps}
+        if path_match and q not in existing_names:
+            snapshot.path_candidates.append(AppCandidate(q, source="path", executable_name=q,
+                                                         executable_path=path_match,
+                                                         executable_exists=True))
         unique: dict[tuple[str, str, str], AppCandidate] = {}
         for candidate in snapshot.app_paths + snapshot.start_menu + snapshot.installed_apps + snapshot.path_candidates:
             if not candidate.display_name:
