@@ -46,12 +46,12 @@ class PetWindow(QWidget):
         if self._animation.name == "sleep": self.play("idle")
         if not self.chat.isVisible() and not self.chat.pending: self._last_activity.start(30000)
     def open_chat(self):
-        self._activity(); self.play("wave"); screen = self.screen() or QApplication.primaryScreen(); self.chat.adjustSize(); self.chat.move(chat_position(self.frameGeometry(), screen.availableGeometry(), (self.chat.width(), self.chat.height()))); self.chat.show(); self.chat.raise_(); self.chat.activateWindow()
+        self._activity(); self.play("wave"); screen = self.screen() or QApplication.primaryScreen(); self.chat.adjustSize(); position = chat_position(self.frameGeometry(), screen.availableGeometry(), (self.chat.width(), self.chat.height())); self.chat.set_tail_left(position.x() > self.frameGeometry().right()); self.chat.move(position); self.chat.show(); self.chat.raise_(); self.chat.activateWindow()
     def close_chat(self): self.chat.close()
     def moveEvent(self, event):
         super().moveEvent(event)
         if self.chat.isVisible():
-            screen = self.screen() or QApplication.primaryScreen(); self.chat.move(chat_position(self.frameGeometry(), screen.availableGeometry(), (self.chat.width(), self.chat.height())))
+            screen = self.screen() or QApplication.primaryScreen(); position = chat_position(self.frameGeometry(), screen.availableGeometry(), (self.chat.width(), self.chat.height())); self.chat.set_tail_left(position.x() > self.frameGeometry().right()); self.chat.move(position)
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
             self._activity(); self._press_position = event.globalPosition().toPoint(); self._drag_offset = self._press_position - self.pos(); self._dragged = False
