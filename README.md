@@ -10,7 +10,7 @@ WindowsPet は、Windows 11 のデスクトップ上で動作する透明なデ�
 - Enter で送信、Shift+Enter で改行
 - OpenAI Responses API を使った会話とストリーミング表示
 - Windows Credential Manager または `OPENAI_API_KEY` による API キー取得
-- 会話履歴ウィンドウ（履歴はローカル保存）
+- 実行中の会話履歴を確認できる会話履歴ウィンドウ
 - 許可したフォルダー内の読み取り専用ファイル検索
 - ファイル名、拡張子、更新日時、サイズなどのメタデータ検索
 - 検索結果の表示、保存場所を Explorer で開く、パスのコピー、検索キャンセル
@@ -28,7 +28,7 @@ WindowsPet は、Windows 11 のデスクトップ上で動作する透明なデ�
 PowerShell またはコマンドプロンプトで次を実行します。
 
 ```bat
-cd /d D:\work\WindowsPet
+cd WindowsPet
 py -3.12 -m venv .venv
 .venv\Scripts\python -m pip install --upgrade pip
 .venv\Scripts\python -m pip install -e ".[test,build]"
@@ -90,7 +90,7 @@ API キーや実際のユーザー環境、ファイルパス、サーバー情�
 build.bat
 ```
 
-ビルド成果物は `dist\WindowsPet\WindowsPet.exe` に出力されます。PyInstaller の設定は `WindowsPet.spec`、アニメーション素材は `assets\animations\` にあります。
+ビルド成果物は `dist\WindowsPet.exe` に出力されます。PyInstaller の設定は `WindowsPet.spec`、アニメーション素材は `assets\animations\` にあります。
 
 ## プロジェクト構成
 
