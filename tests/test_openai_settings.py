@@ -5,7 +5,7 @@ import httpx
 from openai import APIConnectionError, APITimeoutError, AuthenticationError, BadRequestError, InternalServerError, NotFoundError, PermissionDeniedError, RateLimitError
 
 from windows_pet.ai_client import AIClient, AIClientError, classify_openai_error
-from windows_pet.openai_credentials import delete_api_key, get_api_key, has_environment_key, save_api_key
+from windows_pet.openai_credentials import delete_api_key, get_api_key, has_environment_key, has_stored_key, save_api_key
 
 class FakeKeyring:
     def __init__(self): self.values = {}
@@ -21,6 +21,10 @@ def test_environment_key_precedes_credential_manager(monkeypatch):
 def test_credential_manager_read_save_delete(monkeypatch):
     kr = FakeKeyring(); monkeypatch.setattr("windows_pet.openai_credentials._keyring", lambda: kr); monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     save_api_key("dummy"); assert get_api_key() == "dummy"; delete_api_key(); assert get_api_key() is None
+
+def test_has_stored_key_does_not_use_environment(monkeypatch):
+    kr = FakeKeyring(); monkeypatch.setattr("windows_pet.openai_credentials._keyring", lambda: kr); monkeypatch.setenv("OPENAI_API_KEY", "environment")
+    assert not has_stored_key(); kr.set_password("WindowsPet", "openai_api_key", "dummy"); assert has_stored_key()
 
 def test_unconfigured_key_is_none(monkeypatch):
     monkeypatch.setattr("windows_pet.openai_credentials._keyring", lambda: None); monkeypatch.delenv("OPENAI_API_KEY", raising=False)

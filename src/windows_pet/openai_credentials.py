@@ -26,6 +26,12 @@ def get_api_key() -> str | None:
 
 def has_environment_key() -> bool: return bool(os.getenv("OPENAI_API_KEY", "").strip())
 
+def has_stored_key() -> bool:
+    kr = _keyring()
+    if kr is None: return False
+    try: return bool(kr.get_password(SERVICE_NAME, USERNAME))
+    except Exception: return False
+
 def save_api_key(value: str) -> None:
     kr = _keyring()
     if kr is None: raise RuntimeError("Credential Manager が利用できません。keyring をインストールしてください。")

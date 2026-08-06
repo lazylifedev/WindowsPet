@@ -196,7 +196,10 @@ class PetWindow(QWidget):
             self.search_results_window.session = session
             self.search_results_window._populate()
         self.search_results_window.show(); self.search_results_window.raise_(); self.search_results_window.activateWindow()
-    def closeEvent(self, event): self.input_bubble.close(); save_position(self.position_path, self.pos()); super().closeEvent(event)
+    def closeEvent(self, event):
+        self.input_bubble.close()
+        if self.openai_settings_window is not None: self.openai_settings_window.shutdown()
+        save_position(self.position_path, self.pos()); super().closeEvent(event)
 
 
 def main() -> int:
