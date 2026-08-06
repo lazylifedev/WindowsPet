@@ -23,6 +23,12 @@ class InspectionErrorCode(str, Enum):
     UNEXPECTED_ERROR = "unexpected_error"
 
 
+class InspectionStatus(str, Enum):
+    SUCCESS = "success"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True)
 class ToolContract:
     name: str = "local_inspection"
@@ -96,3 +102,10 @@ class InspectionSnapshot:
     searched_candidates: list[AppCandidate] = field(default_factory=list)
     inspected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     contract: ToolContract = field(default_factory=ToolContract)
+
+
+@dataclass(frozen=True)
+class InspectionOutcome:
+    status: InspectionStatus
+    snapshot: InspectionSnapshot | None = None
+    error_code: InspectionErrorCode | None = None

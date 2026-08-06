@@ -20,9 +20,12 @@ def _norm(value: str) -> str:
 
 
 class LocalInspectionService:
-    def __init__(self, env: dict[str, str] | None = None, exists: Callable[[str], bool] | None = None):
+    def __init__(self, env: dict[str, str] | None = None, exists: Callable[[str], bool] | None = None,
+                 which: Callable[[str], str | None] | None = None, run_command=None):
         self.env = env if env is not None else dict(os.environ)
         self.exists = exists or os.path.isdir
+        self.which = which or shutil.which
+        self.run_command = run_command or subprocess.run
 
     def inspect(self, token: CancellationToken | None = None) -> InspectionSnapshot:
         token = token or CancellationToken()
@@ -99,15 +102,12 @@ class LocalInspectionService:
             except (OSError, PermissionError): errors.append(PartialError("start_menu", InspectionErrorCode.ACCESS_DENIED))
         return found
 
-    def _path_candidates(self, token=None) -> list[AppCandidate]:
-        return []
-
     def _winget(self, errors: list[PartialError], token=None) -> WingetStatus:
-        executable = shutil.which("winget")
+        executable = self.which("winget")
         if not executable: return WingetStatus(False, error=InspectionErrorCode.NOT_FOUND)
         if token and token.is_cancelled: return WingetStatus(False, error=InspectionErrorCode.CANCELLED)
         try:
-            result = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=5, shell=False,
+            result = self.run_command([executable, "--version"], capture_output=True, text=True, timeout=5, shell=False,
                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), check=False)
             if result.returncode == 0: return WingetStatus(True, result.stdout.strip())
             return WingetStatus(False, error=InspectionErrorCode.UNAVAILABLE)
@@ -122,18 +122,21 @@ class LocalInspectionService:
         return [AppCandidate("", source="path", executable_name=suffix.lower()) for suffix in suffixes
                 if suffix.strip().lower() in (".com", ".exe", ".bat", ".cmd")]
 
-    @staticmethod
-    def search(snapshot: InspectionSnapshot, query: str, limit: int = 25) -> list[AppCandidate]:
+    def search(self, snapshot: InspectionSnapshot, query: str, limit: int = 25) -> list[AppCandidate]:
         q = _norm(query).casefold()
         if not q or limit <= 0: return []
-        path_match = shutil.which(q)
+        path_match = self.which(q)
         existing_names = {_norm(item.display_name).casefold() for item in snapshot.app_paths + snapshot.start_menu + snapshot.installed_apps}
         if path_match and q not in existing_names:
-            snapshot.path_candidates.append(AppCandidate(q, source="path", executable_name=q,
-                                                         executable_path=path_match,
-                                                         executable_exists=True))
+            path_candidate = AppCandidate(q, source="path", executable_name=q,
+                                          executable_path=path_match, executable_exists=True)
+        else:
+            path_candidate = None
         unique: dict[tuple[str, str, str], AppCandidate] = {}
-        for candidate in snapshot.app_paths + snapshot.start_menu + snapshot.installed_apps + snapshot.path_candidates:
+        candidates = snapshot.app_paths + snapshot.start_menu + snapshot.installed_apps + snapshot.path_candidates
+        if path_candidate is not None:
+            candidates = candidates + [path_candidate]
+        for candidate in candidates:
             if not candidate.display_name:
                 continue
             key = (_norm(candidate.display_name).casefold(), candidate.source, candidate.executable_name.casefold())

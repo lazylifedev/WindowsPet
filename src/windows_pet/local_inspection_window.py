@@ -49,10 +49,8 @@ class LocalInspectionWindow(QDialog):
         self.worker = LocalInspectionWorker(self.service_factory(), self.token)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
-        self.worker.completed.connect(self._completed)
-        self.worker.failed.connect(self._failed)
-        self.worker.completed.connect(self.thread.quit)
-        self.worker.failed.connect(self.thread.quit)
+        self.worker.finished.connect(self._finished)
+        self.worker.finished.connect(self.thread.quit)
         self.thread.finished.connect(self._thread_finished)
         self.thread.start()
 
@@ -87,7 +85,7 @@ class LocalInspectionWindow(QDialog):
         self.results.clear()
         if self.snapshot is None:
             return
-        for item in LocalInspectionService.search(self.snapshot, self.query.text()):
+        for item in self.service_factory().search(self.snapshot, self.query.text()):
             if item.executable_exists is True:
                 state = "存在"
             elif item.executable_exists is False:
@@ -96,12 +94,27 @@ class LocalInspectionWindow(QDialog):
                 state = "不明"
             self.results.addItem(f"{item.display_name} | {item.version} | {item.publisher} | {item.source} | 実行ファイル候補: {state}")
 
-    def closeEvent(self, event):
+    def request_cancel(self) -> None:
         if self.token is not None:
             self.token.cancel()
+
+    def shutdown(self, timeout_ms: int = 7000) -> bool:
+        if self.thread is None or not self.thread.isRunning():
+            return True
+        self.request_cancel()
+        self.thread.quit()
+        return self.thread.wait(timeout_ms)
+
+    def _finished(self, outcome):
+        if outcome.snapshot is not None:
+            self._completed(outcome.snapshot)
+        elif outcome.status.value == "cancelled":
+            self.status.setText("調査をキャンセルしました")
+        else:
+            self.status.setText("調査失敗（本体は継続します）")
+
+    def closeEvent(self, event):
+        self.request_cancel()
         if self.thread is not None and self.thread.isRunning():
-            self.thread.quit()
-            # The only blocking operation has a five-second subprocess timeout.
-            # Wait longer than that so the QObject is never destroyed while running.
-            self.thread.wait(6000)
+            self.shutdown()
         super().closeEvent(event)

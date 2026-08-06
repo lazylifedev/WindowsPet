@@ -255,7 +255,7 @@ class PetWindow(QWidget):
         self.input_bubble.close()
         if self.openai_settings_window is not None: self.openai_settings_window.shutdown()
         if self.help_window is not None: self.help_window.close()
-        if self.local_inspection_window is not None: self.local_inspection_window.close()
+        if self.local_inspection_window is not None: self.local_inspection_window.shutdown()
         if self.tray_icon is not None: self.tray_icon.hide()
         save_position(self.position_path, self.pos()); super().closeEvent(event)
 
