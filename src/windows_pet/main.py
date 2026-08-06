@@ -2,8 +2,8 @@ import logging
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QTimer, Qt
-from PySide6.QtGui import QContextMenuEvent, QMouseEvent
+from PySide6.QtCore import QPoint, QRect, QTimer, Qt
+from PySide6.QtGui import QContextMenuEvent, QImage, QMouseEvent
 from PySide6.QtWidgets import QApplication, QLabel, QMenu, QMessageBox, QWidget
 
 from .animation import load_animations
@@ -45,6 +45,17 @@ class PetWindow(QWidget):
         if name != "sleep" and not self.input_bubble.isVisible() and not self.input_bubble.pending: self._last_activity.start(30000)
 
     def _show_frame(self): self.label.setPixmap(self._animation.frames[self._frame].scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    def visible_pet_rect(self):
+        pixmap = self.label.pixmap()
+        if pixmap is None or pixmap.isNull(): return self.frameGeometry()
+        image = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
+        left, top, right, bottom = image.width(), image.height(), -1, -1
+        for y in range(image.height()):
+            for x in range(image.width()):
+                if image.pixelColor(x, y).alpha() > 0:
+                    left, top, right, bottom = min(left, x), min(top, y), max(right, x), max(bottom, y)
+        if right < left: return self.frameGeometry()
+        return QRect(self.mapToGlobal(QPoint(left, top)), self.mapToGlobal(QPoint(right, bottom))).normalized()
     def _next_frame(self):
         self._frame += 1
         if self._frame >= len(self._animation.frames):

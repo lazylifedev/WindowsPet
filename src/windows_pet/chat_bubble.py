@@ -11,7 +11,7 @@ from .conversation import Conversation
 MIN_INPUT_HEIGHT, MAX_INPUT_HEIGHT = 52, 140
 TAIL_WIDTH, TAIL_HEIGHT = 14, 18
 SHADOW_BLUR, SHADOW_OFFSET_Y = 12, 3
-RESPONSE_GAP = 6
+RESPONSE_GAP = 3
 
 def chat_position(pet_rect: QRect, available: QRect, size=(280, MIN_INPUT_HEIGHT)) -> QPoint:
     width, height = size
@@ -72,11 +72,19 @@ class BubbleFrame(QWidget):
     def tail_tip_local_y(self):
         return 0 if self._tail_direction == "top" else self.height()
 
+    def panel_rect_local(self):
+        top = TAIL_HEIGHT if self._tail_direction == "top" else 0
+        bottom = TAIL_HEIGHT if self._tail_direction == "bottom" else 0
+        return QRect(0, top, self.width(), max(0, self.height() - top - bottom))
+
+    def panel_bottom_local_y(self):
+        return self.panel_rect_local().top() + self.panel_rect_local().height()
+
     def paintEvent(self, event):
         p = QPainter(self); p.setRenderHint(QPainter.Antialiasing)
         top_margin = TAIL_HEIGHT if self._tail_direction == "top" else 0
         bottom_margin = TAIL_HEIGHT if self._tail_direction == "bottom" else 0
-        card = QRect(0, top_margin, self.width(), self.height() - top_margin - bottom_margin)
+        card = self.panel_rect_local()
         path = QPainterPath(); path.addRoundedRect(card, 14, 14)
         p.fillPath(path, QColor('#20242b')); p.setPen(QPen(QColor('#4d5663'), 1)); p.drawPath(path)
         x = self._tail_x if self._tail_x is not None else self.width() // 2
@@ -167,16 +175,19 @@ class InputBubble(BubbleFrame):
     def _position_response(self):
         if not hasattr(self.pet, 'frameGeometry'): return
         screen=self.pet.screen() if hasattr(self.pet, 'screen') else None; area=(screen or QApplication.primaryScreen()).availableGeometry(); r=self.response_bubble
-        pet_rect = self.pet.frameGeometry()
-        position = response_position(pet_rect, area, r.size())
-        r.set_tail_direction("bottom" if position.y() < pet_rect.top() else "top")
-        # Recompute from the actual tail tip, so the visual gap is independent
-        # of the bubble's shadow/panel margins and of streaming resizes.
-        target_y = pet_rect.top() - RESPONSE_GAP if r._tail_direction == "bottom" else pet_rect.bottom() + 1 + RESPONSE_GAP
-        position.setY(target_y - r.tail_tip_local_y())
-        position.setX(pet_rect.center().x() - r.width() // 2)
+        pet_rect = self.pet.visible_pet_rect() if hasattr(self.pet, "visible_pet_rect") else self.pet.frameGeometry()
+        x = pet_rect.center().x() - r.width() // 2
+        y = pet_rect.top() - r.panel_bottom_local_y() - RESPONSE_GAP
+        if y < area.top():
+            r.set_tail_direction("top")
+            y = pet_rect.bottom() + RESPONSE_GAP
+        else:
+            r.set_tail_direction("bottom")
+            y = pet_rect.top() - r.panel_bottom_local_y() - RESPONSE_GAP
+        position = QPoint(x, y)
         position.setX(min(max(position.x(), area.left()), area.right() - r.width() + 1))
-        r.set_tail_x(self.pet.frameGeometry().center().x() - position.x())
+        position.setY(min(max(position.y(), area.top()), area.bottom() - r.height() + 1))
+        r.set_tail_x(pet_rect.center().x() - position.x())
         r.move(position)
     def _on_delta(self,text): self._reply_text+=text; self.response.setText(self._reply_text); self.response_bubble.setText(self._reply_text); self._position_response()
     def _on_finished(self,text):

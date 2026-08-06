@@ -124,8 +124,8 @@ def test_position_spec_edges_and_api_error_mapping(monkeypatch):
     assert chat_position(QRect(0, 300, 100, 100), screen, (280, 100)).x() == 0
     assert chat_position(QRect(900, 300, 100, 100), screen, (280, 100)).x() == 720
     response = response_position(QRect(400, 300, 100, 100), screen, (280, 100))
-    assert response.y() == 296 - 100
-    assert 300 - (response.y() + 100) == 4
+    assert response.y() == 300 - 100 - 3
+    assert 300 - (response.y() + 100) == 3
     assert response_position(QRect(400, 0, 100, 100), screen, (280, 100)).y() > 100
     assert _error(RuntimeError("401 unauthorized")).kind == "auth"
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -142,7 +142,7 @@ def test_response_position_is_centered_for_short_and_long_text(qapp):
         chat.response_bubble.setText(text)
         chat._position_response()
         assert chat.response_bubble.x() + chat.response_bubble.width() / 2 == pet.frameGeometry().center().x()
-        assert chat.response_bubble.y() + chat.response_bubble.height() == pet.frameGeometry().top() - 4
+        assert pet.frameGeometry().top() - (chat.response_bubble.y() + chat.response_bubble.panel_bottom_local_y()) == 3
         assert chat.response_bubble._tail_direction == "bottom"
         assert chat.response_bubble._tail_x == pet.frameGeometry().center().x() - chat.response_bubble.x()
     chat.close()
