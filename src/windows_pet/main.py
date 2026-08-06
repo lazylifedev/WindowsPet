@@ -3,8 +3,8 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QRect, QTimer, Qt
-from PySide6.QtGui import QContextMenuEvent, QImage, QMouseEvent
-from PySide6.QtWidgets import QApplication, QLabel, QMenu, QMessageBox, QWidget
+from PySide6.QtGui import QContextMenuEvent, QImage, QMouseEvent, QIcon
+from PySide6.QtWidgets import QApplication, QLabel, QMenu, QMessageBox, QWidget, QSystemTrayIcon
 
 from .animation import load_animations
 from .chat_bubble import InputBubble, chat_position, response_position
@@ -37,6 +37,7 @@ class PetWindow(QWidget):
         self.search_results_window = None
         self.openai_settings_window = None
         self.help_window = None
+        self.tray_icon = None; self.tray_menu = None
         self.input_bubble.search_completed.connect(self._on_search_completed)
         self.input_bubble.api_settings_requested.connect(self.open_openai_settings)
         self._pet_hovered = False; self._input_hovered = False; self._input_has_focus = False
@@ -104,6 +105,46 @@ class PetWindow(QWidget):
     def open_chat(self):
         if not self.input_bubble.isVisible():
             self._show_chat_bubble()
+
+    def show_pet(self):
+        rect = self.frameGeometry()
+        screens = QApplication.screens()
+        if screens and not any(screen.availableGeometry().intersects(rect) for screen in screens):
+            area = QApplication.primaryScreen().availableGeometry()
+            self.move(constrain_to_primary(area.topLeft(), area, self.width()))
+        self.show(); self.raise_(); self.activateWindow()
+
+    def show_pet_and_open_chat(self):
+        self.show_pet(); self.open_chat(); self.input_bubble.raise_(); self.input_bubble.activateWindow(); self.input_bubble.input.setFocus()
+
+    def setup_system_tray(self) -> bool:
+        if not QSystemTrayIcon.isSystemTrayAvailable(): return False
+        pixmap = None
+        for name in ("idle", *self.animations.keys()):
+            animation = self.animations.get(name)
+            if animation and animation.frames:
+                pixmap = animation.frames[0]; break
+        if pixmap is None: return False
+        icon = QIcon(pixmap); self.setWindowIcon(icon)
+        self.tray_menu = QMenu(self)
+        self.tray_menu.addAction("WindowsPetを表示", self.show_pet)
+        self.tray_menu.addAction("チャットを開く", self.show_pet_and_open_chat)
+        self.tray_menu.addSeparator()
+        self.tray_menu.addAction("OpenAI API 設定", self.open_openai_settings)
+        self.tray_menu.addAction("ファイル検索設定", self.open_file_search_settings)
+        self.tray_menu.addAction("会話履歴", self.input_bubble.show_history)
+        self.tray_menu.addAction("使い方", self.show_help)
+        self.tray_menu.addSeparator(); self.tray_menu.addAction("終了", self.quit_application)
+        self.tray_icon = QSystemTrayIcon(icon, self); self.tray_icon.setToolTip("WindowsPet"); self.tray_icon.setContextMenu(self.tray_menu)
+        self.tray_icon.activated.connect(self._on_tray_activated); self.tray_icon.show(); return True
+
+    def _on_tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick): self.show_pet()
+
+    def quit_application(self):
+        if self.tray_icon is not None: self.tray_icon.hide()
+        app = QApplication.instance()
+        if app is not None: app.quit()
 
     def close_chat(self):
         if self.input_bubble.isVisible():
@@ -207,6 +248,7 @@ class PetWindow(QWidget):
         self.input_bubble.close()
         if self.openai_settings_window is not None: self.openai_settings_window.shutdown()
         if self.help_window is not None: self.help_window.close()
+        if self.tray_icon is not None: self.tray_icon.hide()
         save_position(self.position_path, self.pos()); super().closeEvent(event)
 
 
@@ -216,7 +258,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     try: animations = load_animations(assets_root()); logging.info("animation assets loaded")
     except RuntimeError as exc: logging.exception("asset loading failed"); QMessageBox.critical(None, "Windows Pet", str(exc)); return 1
-    window = PetWindow(animations, root / "data" / "position.json"); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.show(); logging.info("pet window shown"); app.aboutToQuit.connect(window.input_bubble.close); return app.exec()
+    window = PetWindow(animations, root / "data" / "position.json"); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.setup_system_tray(); window.show(); logging.info("pet window shown"); app.aboutToQuit.connect(window.input_bubble.close); return app.exec()
 
 
 if __name__ == "__main__": raise SystemExit(main())

@@ -443,6 +443,13 @@ def test_help_window_is_plain_text_and_reused(qapp, tmp_path):
     assert pet.input_bubble.conversation.messages() == (before if isinstance(before, list) else before.messages())
     pet.close()
 
+def test_system_tray_unavailable_keeps_pet_usable(qapp, tmp_path, monkeypatch):
+    animations = load_animations(Path("assets/animations"))
+    pet = PetWindow(animations, tmp_path / "position.json")
+    monkeypatch.setattr("windows_pet.main.QSystemTrayIcon.isSystemTrayAvailable", staticmethod(lambda: False))
+    assert pet.setup_system_tray() is False and pet.tray_icon is None and pet.tray_menu is None
+    pet.show_pet(); assert pet.isVisible(); pet.close()
+
 
 def test_pet_drag_does_not_toggle_and_edge_bubbles_have_valid_directions(qapp, tmp_path):
     animations = load_animations(Path("assets/animations"))
