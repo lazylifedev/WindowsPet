@@ -3,14 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-
-
-class SideEffect(str, Enum):
-    READ_ONLY = "read_only"
-
-
-class ConfirmationType(str, Enum):
-    NONE = "none"
+from .action_models import ConfirmationType, SideEffect, ToolContract
 
 
 class InspectionErrorCode(str, Enum):
@@ -27,21 +20,6 @@ class InspectionStatus(str, Enum):
     SUCCESS = "success"
     CANCELLED = "cancelled"
     FAILED = "failed"
-
-
-@dataclass(frozen=True)
-class ToolContract:
-    name: str = "local_inspection"
-    version: str = "1"
-    operation: str = "inspect_local_pc"
-    side_effect: SideEffect = SideEffect.READ_ONLY
-    reversible: bool = True
-    requires_admin: bool = False
-    confirmation: ConfirmationType = ConfirmationType.NONE
-    timeout_seconds: float = 5.0
-    cancellation_supported: bool = True
-    verification_method: str = "structured local inspection result"
-    audit_fields: tuple[str, ...] = ("started_at", "completed_at", "status", "partial_error_count")
 
 
 @dataclass(frozen=True)

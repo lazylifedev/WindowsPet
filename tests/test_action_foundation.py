@@ -45,15 +45,18 @@ def test_policy_read_only_and_confirmation():
 
 def test_grant_is_single_use_and_fingerprint_bound():
     contract, proposal = make()
-    store = ExecutionGrantStore()
-    grant = store.issue(proposal)
+    gate = ConfirmationGate(); _, session = gate.prepare(contract, proposal)
+    grant = gate.decide(contract, proposal, ConfirmationDecision.APPROVE, session.session_id)
+    store = gate.grants
     assert store.consume(grant.grant_id, proposal)
     assert not store.consume(grant.grant_id, proposal)
 
 
 def test_concurrent_grant_consume_has_one_success():
     contract, proposal = make()
-    store = ExecutionGrantStore(); grant = store.issue(proposal)
+    gate = ConfirmationGate(); _, session = gate.prepare(contract, proposal)
+    grant = gate.decide(contract, proposal, ConfirmationDecision.APPROVE, session.session_id)
+    store = gate.grants
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(lambda _: store.consume(grant.grant_id, proposal), range(8)))
     assert sum(results) == 1
@@ -61,9 +64,11 @@ def test_concurrent_grant_consume_has_one_success():
 
 def test_gate_only_approves_and_audit_excludes_targets(tmp_path):
     contract, proposal = make(); sink = InMemoryAuditSink(); gate = ConfirmationGate(audit=sink)
-    grant = gate.decide(contract, proposal, ConfirmationDecision.CANCEL)
+    _, session = gate.prepare(contract, proposal)
+    grant = gate.decide(contract, proposal, ConfirmationDecision.CANCEL, session.session_id)
     assert grant is None
-    grant = gate.decide(contract, proposal, ConfirmationDecision.APPROVE)
+    _, session = gate.prepare(contract, proposal)
+    grant = gate.decide(contract, proposal, ConfirmationDecision.APPROVE, session.session_id)
     assert grant is not None
     text = json.dumps([event.__dict__ for event in sink.events])
     assert "FAKE_TARGET" not in text and "FAKE_PATH" not in text
@@ -73,3 +78,28 @@ def test_jsonl_audit_is_one_event_per_line(tmp_path):
     path = tmp_path / "audit.jsonl"; sink = JsonlAuditSink(path)
     sink.write(AuditEvent("proposal_created", task_id="task"))
     assert len(path.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_direct_grant_issue_is_rejected():
+    contract, proposal = make()
+    with pytest.raises(PermissionError):
+        ExecutionGrantStore().issue(proposal)
+
+
+def test_session_is_required_and_readonly_has_no_session():
+    contract, proposal = make()
+    gate = ConfirmationGate()
+    result, session = gate.prepare(contract, proposal)
+    assert session is not None
+    readonly, read_proposal = make(SideEffect.READ_ONLY, ConfirmationType.NONE)
+    read_result, read_session = gate.prepare(readonly, read_proposal)
+    assert read_session is None and read_result.decision is PolicyDecision.ALLOW_READ_ONLY
+
+
+def test_factory_rejects_empty_task_and_invalid_timeout():
+    contract, proposal = make()
+    with pytest.raises(ValueError):
+        ActionProposalFactory().create(contract, "", proposal.target, {}, proposal.preview)
+    bad = ToolContract("x", "1", "x", SideEffect.APPLICATION_LAUNCH, ConfirmationType.SIMPLE, True, False, True, 0, "verify")
+    with pytest.raises(ValueError):
+        ActionProposalFactory().create(bad, "task", proposal.target, {}, proposal.preview)

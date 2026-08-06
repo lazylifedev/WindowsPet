@@ -51,16 +51,16 @@ class ConfirmationDecision(str, Enum):
 
 @dataclass(frozen=True)
 class ToolContract:
-    name: str
-    version: str
-    operation: str
-    side_effect: SideEffect
-    confirmation: ConfirmationType
-    reversible: bool
-    requires_admin: bool
-    cancellation_support: bool
-    timeout_seconds: float
-    verification_method: str
+    name: str = "local_inspection"
+    version: str = "1"
+    operation: str = "inspect_local_pc"
+    side_effect: SideEffect = SideEffect.READ_ONLY
+    confirmation: ConfirmationType = ConfirmationType.NONE
+    reversible: bool = True
+    requires_admin: bool = False
+    cancellation_support: bool = True
+    timeout_seconds: float = 5.0
+    verification_method: str = "structured local inspection result"
     audit_fields: tuple[str, ...] = ()
 
 
@@ -79,6 +79,62 @@ class ActionPreview:
     before: str = ""
     after: str = ""
     category: ConfirmationType = ConfirmationType.SIMPLE
+
+
+@dataclass(frozen=True)
+class SimpleActionPreview(ActionPreview):
+    category: ConfirmationType = ConfirmationType.SIMPLE
+
+
+@dataclass(frozen=True)
+class BeforeAfterActionPreview(ActionPreview):
+    change_summary: str = ""
+    backup_available: bool = False
+    category: ConfirmationType = ConfirmationType.BEFORE_AFTER
+
+
+@dataclass(frozen=True)
+class PlanImpactActionPreview(ActionPreview):
+    purpose: str = ""
+    steps: tuple[str, ...] = ()
+    restart_possible: bool = False
+    rollback_summary: str = ""
+    category: ConfirmationType = ConfirmationType.PLAN_IMPACT
+
+
+@dataclass(frozen=True)
+class ExternalSendActionPreview(ActionPreview):
+    recipient: str = ""
+    attachment_display_names: tuple[str, ...] = ()
+    destination_type: str = ""
+    visibility: str = ""
+    category: ConfirmationType = ConfirmationType.EXTERNAL_SEND
+
+
+@dataclass(frozen=True)
+class InstallationActionPreview(ActionPreview):
+    product_name: str = ""
+    publisher: str = ""
+    package_id: str = ""
+    installation_method: str = ""
+    restart_possible: bool = False
+    expected_changes: str = ""
+    category: ConfirmationType = ConfirmationType.INSTALLATION
+
+
+def validate_contract(contract: ToolContract) -> None:
+    if not all(isinstance(value, str) and value.strip() for value in (contract.name, contract.version, contract.operation, contract.verification_method)):
+        raise ValueError("invalid_contract")
+    if not isinstance(contract.side_effect, SideEffect) or not isinstance(contract.confirmation, ConfirmationType):
+        raise ValueError("invalid_contract")
+    if contract.side_effect is SideEffect.READ_ONLY and contract.confirmation is not ConfirmationType.NONE:
+        raise ValueError("invalid_confirmation_type")
+    if contract.side_effect is not SideEffect.READ_ONLY and contract.confirmation is ConfirmationType.NONE:
+        raise ValueError("confirmation_required")
+    if contract.timeout_seconds <= 0 or not math.isfinite(contract.timeout_seconds):
+        raise ValueError("invalid_timeout")
+    if not all(isinstance(field, str) for field in contract.audit_fields):
+        raise ValueError("invalid_audit_fields")
 
 
 @dataclass(frozen=True)
@@ -154,6 +210,11 @@ class ActionProposalFactory:
 
     def create(self, contract: ToolContract, task_id: str, target: ActionTarget,
                parameters: Mapping[str, Any], preview: ActionPreview) -> ActionProposal:
+        validate_contract(contract)
+        if not task_id.strip() or not all(isinstance(value, str) and value.strip() for value in (target.kind, target.identifier, target.display_name)):
+            raise ValueError("invalid_target")
+        if not isinstance(preview, ActionPreview) or preview.category is not contract.confirmation:
+            raise ValueError("preview_mismatch")
         frozen = _freeze(dict(parameters))
         created = self.now()
         expires = created + self.lifetime

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
-from .action_models import ActionProposal, ConfirmationType, PolicyDecision, SideEffect, ToolContract, proposal_fingerprint
+from .action_models import ActionProposal, ConfirmationType, PolicyDecision, SideEffect, ToolContract, proposal_fingerprint, validate_contract
 
 
 @dataclass(frozen=True)
@@ -15,6 +15,10 @@ class PolicyResult:
 class PolicyGate:
     """Validates the contract and immutable proposal before confirmation."""
     def evaluate(self, contract: ToolContract, proposal: ActionProposal, now: datetime | None = None) -> PolicyResult:
+        try:
+            validate_contract(contract)
+        except ValueError as error:
+            return PolicyResult(PolicyDecision.DENY, str(error))
         if not isinstance(proposal.side_effect, SideEffect): return PolicyResult(PolicyDecision.DENY, "unknown_side_effect")
         if proposal.fingerprint != proposal_fingerprint(proposal): return PolicyResult(PolicyDecision.DENY, "invalid_fingerprint")
         if proposal.tool_name != contract.name or proposal.tool_version != contract.version: return PolicyResult(PolicyDecision.DENY, "contract_mismatch")
