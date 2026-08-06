@@ -155,6 +155,10 @@ class PetWindow(QWidget):
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton: self.open_chat()
     def contextMenuEvent(self, event: QContextMenuEvent):
+        menu = self._build_context_menu()
+        menu.exec(event.globalPos())
+
+    def _build_context_menu(self):
         menu = QMenu(self)
         menu.addAction('OpenAI API 設定', self.open_openai_settings)
         menu.addAction('ファイル検索設定', self.open_file_search_settings)
@@ -165,10 +169,10 @@ class PetWindow(QWidget):
         menu.addSeparator()
         menu.addAction('チャットを開く', self.open_chat)
         menu.addAction('チャットを閉じる', self.close_chat)
-        menu.addAction('Conversation history', self.input_bubble.show_history)
-        menu.addAction('Reset position', self.reset_position)
-        menu.addAction('Quit', QApplication.instance().quit)
-        menu.exec(event.globalPos())
+        menu.addAction('会話履歴', self.input_bubble.show_history)
+        menu.addAction('位置をリセット', self.reset_position)
+        menu.addAction('終了', QApplication.instance().quit)
+        return menu
     def reset_position(self): self.move(100, 100); self._activity()
     def open_file_search_settings(self):
         if self.search_settings_window is None:

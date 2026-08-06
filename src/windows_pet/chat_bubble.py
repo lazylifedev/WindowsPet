@@ -111,7 +111,7 @@ class ResponseBubble(BubbleFrame):
 
 class HistoryWindow(QDialog):
     def __init__(self, conversation, parent=None):
-        super().__init__(parent); self.setWindowTitle('Conversation history'); self.resize(680, 560)
+        super().__init__(parent); self.setWindowTitle('会話履歴'); self.resize(680, 560)
         area=QScrollArea(); area.setWidgetResizable(True); body=QWidget(); layout=QVBoxLayout(body)
         for message in conversation.messages():
             label=QLabel(message['content']); label.setWordWrap(True); layout.addWidget(label)

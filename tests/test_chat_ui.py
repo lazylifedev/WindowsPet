@@ -106,6 +106,20 @@ def test_clear_is_blocked_during_request_and_history_reflects_conversation(qapp)
     history.close(); close_chat(chat, qapp)
 
 
+def test_context_menu_and_history_use_japanese_labels(qapp, tmp_path):
+    animations = load_animations(Path("assets/animations"))
+    pet = PetWindow(animations, tmp_path / "position.json")
+    menu = pet._build_context_menu()
+    labels = [action.text() for action in menu.actions() if not action.isSeparator()]
+    assert labels == [
+        "OpenAI API 設定", "ファイル検索設定", "最近の検索結果", "検索をキャンセル",
+        "チャットを開く", "チャットを閉じる", "会話履歴", "位置をリセット", "終了",
+    ]
+    history = HistoryWindow(pet.input_bubble.conversation)
+    assert history.windowTitle() == "会話履歴"
+    history.close(); pet.close()
+
+
 def test_response_auto_hide_and_pinned(monkeypatch, qapp):
     timers = []
     monkeypatch.setattr("windows_pet.chat_bubble.QTimer.singleShot", lambda ms, fn: timers.append(fn))
