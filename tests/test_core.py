@@ -1,8 +1,11 @@
 import json
+import sys
+import pytest
 from pathlib import Path
 from PySide6.QtCore import QPoint, QRect
 from windows_pet.storage import constrain_to_primary, load_position, save_position
 from windows_pet.animation import load_animations
+from windows_pet.paths import resource_path
 from windows_pet.chat_bubble import ChatBubble, chat_position
 
 ROOT = Path(__file__).parents[1]
@@ -10,6 +13,19 @@ def test_manifest_and_variable_frame_counts(qapp):
     animations = load_animations(ROOT / 'assets' / 'animations')
     assert len(animations['idle'].frames) == 4
     assert len(animations['thinking'].frames) == 3
+    assert resource_path('assets/animations/manifest.json').is_file()
+
+def test_resource_path_uses_meipass_and_ignores_cwd(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(sys, '_MEIPASS', str(tmp_path), raising=False)
+    monkeypatch.chdir(tmp_path)
+    assert resource_path('assets/animations/manifest.json') == tmp_path / 'assets/animations/manifest.json'
+
+def test_resource_path_requires_meipass(monkeypatch):
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.delattr(sys, '_MEIPASS', raising=False)
+    with pytest.raises(RuntimeError, match='sys._MEIPASS'):
+        resource_path('assets/animations/manifest.json')
 def test_missing_asset_error(tmp_path, qapp):
     manifest = {'animations': {'x': {'frame_count': 1, 'fps_recommended': 1, 'frames': [{'file':'missing.png'}]}}}
     (tmp_path/'manifest.json').write_text(json.dumps(manifest))

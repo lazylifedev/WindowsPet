@@ -101,10 +101,11 @@ class PetWindow(QWidget):
 
 def main() -> int:
     root = application_root(); (root / "logs").mkdir(exist_ok=True); logging.basicConfig(filename=root / "logs" / "windows_pet.log", level=logging.INFO, encoding="utf-8")
+    logging.info("startup diagnostics frozen=%s meipass=%s executable=%s cwd=%s manifest=%s", getattr(sys, "frozen", False), getattr(sys, "_MEIPASS", None), sys.executable, Path.cwd(), assets_root() / "manifest.json")
     app = QApplication(sys.argv)
-    try: animations = load_animations(assets_root())
+    try: animations = load_animations(assets_root()); logging.info("animation assets loaded")
     except RuntimeError as exc: logging.exception("asset loading failed"); QMessageBox.critical(None, "Windows Pet", str(exc)); return 1
-    window = PetWindow(animations, root / "data" / "position.json"); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.show(); app.aboutToQuit.connect(window.chat.close); return app.exec()
+    window = PetWindow(animations, root / "data" / "position.json"); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.show(); logging.info("pet window shown"); app.aboutToQuit.connect(window.chat.close); return app.exec()
 
 
 if __name__ == "__main__": raise SystemExit(main())
