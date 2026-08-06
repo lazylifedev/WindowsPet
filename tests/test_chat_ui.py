@@ -162,7 +162,7 @@ def test_context_menu_and_history_use_japanese_labels(qapp, tmp_path):
     labels = [action.text() for action in menu.actions() if not action.isSeparator()]
     assert labels == [
         "OpenAI API 設定", "ファイル検索設定", "最近の検索結果", "処理をキャンセル",
-        "チャットを開く", "チャットを閉じる", "会話履歴", "位置をリセット", "終了",
+        "チャットを開く", "チャットを閉じる", "会話履歴", "使い方", "位置をリセット", "終了",
     ]
     history = HistoryWindow(pet.input_bubble.conversation)
     assert history.windowTitle() == "会話履歴"
@@ -427,6 +427,20 @@ def test_pet_click_opens_and_closes_real_input_bubble_without_legacy_api(qapp, t
     assert pet.input_bubble._tail_direction == expected_direction
     pet.mousePressEvent(press); pet.mouseReleaseEvent(release); qapp.processEvents()
     assert not pet.input_bubble.isVisible()
+    pet.close()
+
+def test_help_window_is_plain_text_and_reused(qapp, tmp_path):
+    animations = load_animations(Path("assets/animations"))
+    pet = PetWindow(animations, tmp_path / "position.json")
+    before = pet.conversation if hasattr(pet, 'conversation') else pet.input_bubble.conversation.messages()
+    pet.show_help(); first = pet.help_window; qapp.processEvents()
+    assert first.windowTitle() == "WindowsPet の使い方"
+    assert first.browser.isReadOnly() and first.browser.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+    assert first.browser.toPlainText().find("左クリック") >= 0
+    assert "検索をキャンセル" not in first.browser.toPlainText()
+    first.browser.setPlainText("<b>test</b>"); assert first.browser.toPlainText() == "<b>test</b>"
+    first.hide(); pet.show_help(); assert pet.help_window is first and first.isVisible()
+    assert pet.input_bubble.conversation.messages() == (before if isinstance(before, list) else before.messages())
     pet.close()
 
 

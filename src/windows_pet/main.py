@@ -14,6 +14,7 @@ from .file_search_settings_window import FileSearchSettingsWindow
 from .search_results_window import SearchResultsWindow
 from .search_result_store import SearchResultStore
 from .openai_settings_window import OpenAISettingsWindow
+from .help_window import HelpWindow
 
 
 class PetWindow(QWidget):
@@ -35,6 +36,7 @@ class PetWindow(QWidget):
         self.search_settings_window = None
         self.search_results_window = None
         self.openai_settings_window = None
+        self.help_window = None
         self.input_bubble.search_completed.connect(self._on_search_completed)
         self.input_bubble.api_settings_requested.connect(self.open_openai_settings)
         self._pet_hovered = False; self._input_hovered = False; self._input_has_focus = False
@@ -171,6 +173,7 @@ class PetWindow(QWidget):
         menu.addAction('チャットを開く', self.open_chat)
         menu.addAction('チャットを閉じる', self.close_chat)
         menu.addAction('会話履歴', self.input_bubble.show_history)
+        menu.addAction('使い方', self.show_help)
         menu.addAction('位置をリセット', self.reset_position)
         menu.addAction('終了', QApplication.instance().quit)
         return menu
@@ -183,6 +186,9 @@ class PetWindow(QWidget):
         if self.openai_settings_window is None:
             self.openai_settings_window = OpenAISettingsWindow(self)
         self.openai_settings_window.show(); self.openai_settings_window.raise_(); self.openai_settings_window.activateWindow()
+    def show_help(self):
+        if self.help_window is None: self.help_window = HelpWindow(self)
+        self.help_window.show(); self.help_window.raise_(); self.help_window.activateWindow()
     def show_recent_search(self):
         session = self.search_store.latest()
         if session:
@@ -200,6 +206,7 @@ class PetWindow(QWidget):
     def closeEvent(self, event):
         self.input_bubble.close()
         if self.openai_settings_window is not None: self.openai_settings_window.shutdown()
+        if self.help_window is not None: self.help_window.close()
         save_position(self.position_path, self.pos()); super().closeEvent(event)
 
 
