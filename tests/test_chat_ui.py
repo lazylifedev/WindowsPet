@@ -5,7 +5,7 @@ from PySide6.QtCore import QEvent, QPoint, QRect, Qt
 from PySide6.QtGui import QEnterEvent, QFocusEvent, QKeyEvent, QPaintEvent
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtCore import QPointF, QObject, Signal
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget, QFrame
 
 from windows_pet.ai_client import AIClient, AIClientError, _error
 from windows_pet.chat_bubble import ChatBubble, HistoryWindow, MessageEdit, chat_position, response_position
@@ -126,6 +126,31 @@ def test_clear_is_blocked_during_request_and_history_reflects_conversation(qapp)
     chat.conversation.add_user("new"); chat.conversation.add_assistant("reply")
     history = HistoryWindow(chat.conversation); history.show(); qapp.processEvents()
     assert "new" in [w.text() for w in history.findChildren(type(chat.response))]
+    history.close(); close_chat(chat, qapp)
+
+
+def test_history_actions_resync_after_completion_and_failure(qapp):
+    chat = make_chat(qapp)
+    chat.conversation.add_user('old'); chat.conversation.add_assistant('reply')
+    chat.show_history(); history = chat.history_window; qapp.processEvents()
+    chat.input.setPlainText('new'); assert chat.send_message() is True
+    assert not history.clear_button.isEnabled()
+    chat._on_finished('answer'); assert history.clear_button.isEnabled()
+    before = chat.conversation.messages(); chat.input.setPlainText('again'); assert chat.send_message() is True
+    chat._on_failed('cancelled', 'キャンセル'); assert history.clear_button.isEnabled()
+    assert chat.conversation.messages() == before + [{'role': 'user', 'content': 'again'}]
+    close_chat(chat, qapp)
+
+
+def test_history_refresh_replaces_rows_without_duplicates(qapp):
+    chat = make_chat(qapp); chat.conversation.add_user('質問'); chat.conversation.add_assistant('回答')
+    history = HistoryWindow(chat.conversation); history.show()
+    for _ in range(3): history.refresh(); qapp.processEvents()
+    assert len(history.body.findChildren(QFrame, 'message-card')) == 2
+    chat.conversation.add_user('次'); chat.conversation.add_assistant('答'); history.refresh(); qapp.processEvents()
+    assert len(history.body.findChildren(QFrame, 'message-card')) == 4
+    chat.conversation.clear(); history.refresh(); qapp.processEvents()
+    assert not history.copy_button.isEnabled() and not history.clear_button.isEnabled()
     history.close(); close_chat(chat, qapp)
 
 

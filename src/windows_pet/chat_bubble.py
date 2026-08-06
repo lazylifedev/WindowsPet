@@ -168,6 +168,7 @@ class HistoryWindow(QDialog):
     def __init__(self, conversation, parent=None, clear_callback=None):
         super().__init__(parent)
         self.conversation = conversation; self._clear_callback = clear_callback
+        self._pending = False
         self.setWindowTitle('会話履歴'); self.resize(680, 560); self.setMinimumSize(420, 320)
         self.area = QScrollArea(); self.area.setWidgetResizable(True); self.area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.body = QWidget(); self.layout = QVBoxLayout(self.body); self.layout.setContentsMargins(14, 14, 14, 14); self.layout.setSpacing(10)
@@ -178,10 +179,12 @@ class HistoryWindow(QDialog):
         root = QVBoxLayout(self); root.addWidget(self.area); root.addLayout(buttons)
         self.refresh()
 
-    def refresh(self, messages=None):
+    def refresh(self, messages=None, pending=None):
+        if pending is not None: self._pending = bool(pending)
         while self.layout.count():
             item = self.layout.takeAt(0); widget = item.widget()
-            if widget: widget.deleteLater()
+            if widget:
+                widget.setParent(None); widget.deleteLater()
         messages = self.conversation.messages() if messages is None else messages
         if not messages:
             empty = QLabel('会話履歴はまだありません。'); empty.setAlignment(Qt.AlignCenter); empty.setStyleSheet('color:#aeb7c4; font-size:14px;'); self.layout.addWidget(empty, 1)
@@ -189,15 +192,27 @@ class HistoryWindow(QDialog):
             for message in messages:
                 role = message.get('role', '')
                 name = {'user': 'あなた', 'assistant': 'WindowsPet'}.get(role, 'メッセージ')
-                card = QFrame(); card.setMaximumWidth(560); card.setStyleSheet('QFrame{background:%s; border-radius:10px; padding:8px;}' % ('#354b68' if role == 'user' else '#2b313b'))
+                card = QFrame(); card.setObjectName('message-card'); card.setMaximumWidth(560); card.setStyleSheet('QFrame{background:%s; border-radius:10px; padding:8px;}' % ('#354b68' if role == 'user' else '#2b313b'))
                 card_layout = QVBoxLayout(card); title = QLabel(name); title.setStyleSheet('color:#b8c5d6; font-size:11px; font-weight:bold;')
                 text = QLabel(); text.setTextFormat(Qt.PlainText); text.setTextInteractionFlags(Qt.TextSelectableByMouse); text.setWordWrap(True); text.setText(message.get('content', '')); text.setMinimumHeight(24); text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum); text.setStyleSheet('QLabel{color:white; background:transparent; padding:0;}')
                 card_layout.addWidget(title); card_layout.addWidget(text)
-                row = QHBoxLayout(); row.addStretch() if role == 'user' else None; row.addWidget(card); row.addStretch() if role != 'user' else None; self.layout.addLayout(row)
+                row_widget = QWidget(); row = QHBoxLayout(row_widget); row.setContentsMargins(0, 0, 0, 0)
+                if role == 'user': row.addStretch()
+                row.addWidget(card)
+                if role != 'user': row.addStretch()
+                self.layout.addWidget(row_widget)
             self.layout.addStretch()
-        enabled = bool(messages)
-        self.copy_button.setEnabled(enabled); self.clear_button.setEnabled(enabled and not (self._clear_callback and getattr(self._clear_callback.__self__, 'pending', False)))
-        QTimer.singleShot(0, lambda: self.area.verticalScrollBar().setValue(self.area.verticalScrollBar().maximum()))
+        self._update_actions(bool(messages))
+        QTimer.singleShot(0, self._scroll_to_bottom)
+
+    def _update_actions(self, has_messages=None):
+        has_messages = bool(self.conversation.messages()) if has_messages is None else bool(has_messages)
+        self.copy_button.setEnabled(has_messages)
+        self.clear_button.setEnabled(has_messages and not self._pending)
+
+    def _scroll_to_bottom(self):
+        if self.isVisible():
+            bar = self.area.verticalScrollBar(); bar.setValue(bar.maximum())
 
     def copy_conversation(self):
         if self.copy_button.isEnabled(): QApplication.clipboard().setText(format_conversation_text(self.conversation.messages()))
@@ -258,11 +273,15 @@ class InputBubble(BubbleFrame):
     def show_history(self):
         if not hasattr(self, 'history_window') or self.history_window is None:
             self.history_window = HistoryWindow(self.conversation, clear_callback=self.clear_messages)
-        self.history_window.refresh(); self.history_window.show(); self.history_window.raise_(); self.history_window.activateWindow()
+        self._refresh_history_window(); self.history_window.show(); self.history_window.raise_(); self.history_window.activateWindow()
+    def _refresh_history_window(self, *, refresh_messages=True):
+        window = getattr(self, 'history_window', None)
+        if window is not None:
+            window.refresh(self.conversation.messages() if refresh_messages else None, pending=self.pending)
     def clear_messages(self):
         if self._pending:return False
         self.conversation.clear()
-        if getattr(self, 'history_window', None) is not None: self.history_window.refresh()
+        self._refresh_history_window()
         return True
     def set_response_pinned(self, pinned):
         pinned = bool(pinned)
@@ -289,7 +308,7 @@ class InputBubble(BubbleFrame):
         if not text:return False
         self._reply_text=''; self._search_status_active=False; self.response_pinned=False; self._response_generation += 1
         self.input.clear(); self.conversation.add_user(text); self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking'); self.response_bubble.setText('考え中…'); self._position_response(); self.response_bubble.show()
-        if getattr(self, 'history_window', None) is not None: self.history_window.refresh()
+        self._refresh_history_window()
         self._thread=QThread(self); self._worker=self._worker_factory(self.conversation.messages()); self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.search_started.connect(self._on_search_started); self._worker.search_completed.connect(self._on_search_completed)
         self._worker.finished.connect(self._on_finished); self._worker.failed.connect(self._on_failed); self._worker.finished.connect(self._thread.quit); self._worker.failed.connect(self._thread.quit); self._thread.finished.connect(self._thread_done); self._thread.start(); return True
@@ -335,12 +354,13 @@ class InputBubble(BubbleFrame):
     def _on_finished(self,text):
         self._search_status_active=False
         self.response.setText(text); self.response_bubble.setText(text); self.response_bubble.set_copy_enabled(bool(text.strip())); self.response_bubble.set_actions_enabled(bool(text.strip())); self._position_response(); self.conversation.add_assistant(text)
-        if getattr(self, 'history_window', None) is not None: self.history_window.refresh()
+        self._refresh_history_window()
         if not text.strip(): self.response_bubble.hide()
         self._complete()
     def _on_failed(self,kind,message): self.response.setText(message); self.response_bubble.setText(message); self.response_bubble.set_copy_enabled(bool(message.strip())); self.response_bubble.set_actions_enabled(bool(message.strip())); self._position_response(); self._complete()
     def _complete(self):
         self._pending=False; self._search_in_progress=False; self.send_button.setEnabled(True); self.send_finished.emit(); self.pet.play('idle')
+        self._refresh_history_window(refresh_messages=False)
         if not self.response_pinned: self._schedule_response_auto_hide()
     def _schedule_response_auto_hide(self):
         self._response_generation += 1
