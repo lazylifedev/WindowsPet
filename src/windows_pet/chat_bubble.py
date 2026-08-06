@@ -10,6 +10,7 @@ from .conversation import Conversation
 
 MIN_INPUT_HEIGHT, MAX_INPUT_HEIGHT = 52, 140
 TAIL_WIDTH, TAIL_HEIGHT = 14, 18
+SHADOW_BLUR, SHADOW_OFFSET_Y = 12, 3
 
 def chat_position(pet_rect: QRect, available: QRect, size=(280, MIN_INPUT_HEIGHT)) -> QPoint:
     width, height = size
@@ -103,8 +104,11 @@ class InputBubble(BubbleFrame):
         super().__init__(); self.pet=pet; self._pending=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.card=QFrame(self); self.card.setStyleSheet('QFrame{background:#20242b;border:0;}')
-        shadow=QGraphicsDropShadowEffect(self); shadow.setBlurRadius(16); shadow.setOffset(0,3); shadow.setColor(QColor(0,0,0,70)); self.setGraphicsEffect(shadow)
-        outer=QVBoxLayout(self); outer.setContentsMargins(8, TAIL_HEIGHT+2, 8, 6); outer.setSpacing(0); outer.addWidget(self.card)
+        # A layered top-level window must never receive an effect whose expanded
+        # repaint area is outside its own bitmap.  Keep the effect on the child
+        # panel and reserve the complete blur/offset area in the parent layout.
+        shadow=QGraphicsDropShadowEffect(self.card); shadow.setBlurRadius(SHADOW_BLUR); shadow.setOffset(0, SHADOW_OFFSET_Y); shadow.setColor(QColor(0,0,0,70)); self.card.setGraphicsEffect(shadow)
+        outer=QVBoxLayout(self); outer.setContentsMargins(SHADOW_BLUR, TAIL_HEIGHT+SHADOW_BLUR, SHADOW_BLUR, SHADOW_BLUR+SHADOW_OFFSET_Y); outer.setSpacing(0); outer.addWidget(self.card)
         row=QHBoxLayout(self.card); row.setContentsMargins(8,5,8,5); row.setSpacing(6)
         self.input=MessageEdit(); self.input.setPlaceholderText('Type a message...'); self.input.setMinimumHeight(MIN_INPUT_HEIGHT-10); self.input.setMaximumHeight(MAX_INPUT_HEIGHT); self.input.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed); self.input.setStyleSheet('QPlainTextEdit{color:white;background:#303641;border:1px solid #596473;border-radius:8px;padding:5px;}')
         self.send_button=QPushButton('➤'); self.send_button.setFixedSize(34,34); self.send_button.setStyleSheet('QPushButton{color:white;background:#4d78b8;border:0;border-radius:8px;}')
