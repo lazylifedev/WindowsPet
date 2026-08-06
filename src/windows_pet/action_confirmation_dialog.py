@@ -1,21 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QDialog, QLabel, QPushButton, QVBoxLayout, QHBoxLayout
 
-from .action_models import ActionProposal, ConfirmationDecision
+from .action_models import ActionProposal, ConfirmationDecision, ConfirmationResponse
 from .confirmation_gate import ConfirmationSession
 
 
-@dataclass(frozen=True)
-class ConfirmationResponse:
-    decision: ConfirmationDecision
-    session_id: str
-    proposal_id: str
-    displayed_fingerprint: str
 
 
 class ActionConfirmationDialog(QDialog):

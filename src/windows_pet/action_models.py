@@ -49,6 +49,14 @@ class ConfirmationDecision(str, Enum):
 
 
 @dataclass(frozen=True)
+class ConfirmationResponse:
+    decision: ConfirmationDecision
+    session_id: str
+    proposal_id: str
+    displayed_fingerprint: str
+
+
+@dataclass(frozen=True)
 class ToolContract:
     name: str = "local_inspection"
     version: str = "1"

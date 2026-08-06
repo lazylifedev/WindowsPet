@@ -46,7 +46,7 @@ def test_policy_read_only_and_confirmation():
 def test_grant_is_single_use_and_fingerprint_bound():
     contract, proposal = make()
     gate = ConfirmationGate(); _, session = gate.prepare(contract, proposal)
-    grant = gate.decide(contract, proposal, ConfirmationDecision.APPROVE, session.session_id)
+    grant = gate.decide(contract, proposal, ConfirmationResponse(ConfirmationDecision.APPROVE, session.session_id, proposal.proposal_id, proposal.fingerprint)).grant
     store = gate.grants
     assert store.consume_for(grant.grant_id, contract, proposal).success
     assert not store.consume_for(grant.grant_id, contract, proposal).success
@@ -55,7 +55,7 @@ def test_grant_is_single_use_and_fingerprint_bound():
 def test_concurrent_grant_consume_has_one_success():
     contract, proposal = make()
     gate = ConfirmationGate(); _, session = gate.prepare(contract, proposal)
-    grant = gate.decide(contract, proposal, ConfirmationDecision.APPROVE, session.session_id)
+    grant = gate.decide(contract, proposal, ConfirmationResponse(ConfirmationDecision.APPROVE, session.session_id, proposal.proposal_id, proposal.fingerprint)).grant
     store = gate.grants
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(lambda _: store.consume_for(grant.grant_id, contract, proposal).success, range(8)))
@@ -65,10 +65,10 @@ def test_concurrent_grant_consume_has_one_success():
 def test_gate_only_approves_and_audit_excludes_targets(tmp_path):
     contract, proposal = make(); sink = InMemoryAuditSink(); gate = ConfirmationGate(audit=sink)
     _, session = gate.prepare(contract, proposal)
-    grant = gate.decide(contract, proposal, ConfirmationDecision.CANCEL, session.session_id)
+    grant = gate.decide(contract, proposal, ConfirmationResponse(ConfirmationDecision.CANCEL, session.session_id, proposal.proposal_id, proposal.fingerprint)).grant
     assert grant is None
     _, session = gate.prepare(contract, proposal)
-    grant = gate.decide(contract, proposal, ConfirmationDecision.APPROVE, session.session_id)
+    grant = gate.decide(contract, proposal, ConfirmationResponse(ConfirmationDecision.APPROVE, session.session_id, proposal.proposal_id, proposal.fingerprint)).grant
     assert grant is not None
     text = json.dumps([event.__dict__ for event in sink.events])
     assert "FAKE_TARGET" not in text and "FAKE_PATH" not in text
@@ -82,8 +82,7 @@ def test_jsonl_audit_is_one_event_per_line(tmp_path):
 
 def test_direct_grant_issue_is_rejected():
     contract, proposal = make()
-    with pytest.raises(PermissionError):
-        ExecutionGrantStore().issue(proposal)
+    assert not hasattr(ExecutionGrantStore(), "issue")
 
 
 def test_session_is_required_and_readonly_has_no_session():

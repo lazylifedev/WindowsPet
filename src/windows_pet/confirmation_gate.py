@@ -3,20 +3,11 @@ import secrets
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from .action_models import ActionProposal, ConfirmationDecision, PolicyDecision, ToolContract
 from enum import Enum
-from .audit_log import AuditEvent, AuditSink
-from .execution_grant import ExecutionGrant, ExecutionGrantIssuer, ExecutionGrantStore, _new_approved_capability
+from .action_models import ActionProposal, ConfirmationDecision, ConfirmationResponse, PolicyDecision, ToolContract
+from .audit_log import AuditEvent
+from .execution_grant import ExecutionGrant, ExecutionGrantStore
 from .policy_gate import PolicyGate
-
-
-@dataclass(frozen=True)
-class ConfirmationSession:
-    session_id: str
-    proposal_id: str
-    proposal_fingerprint: str
-    created_at: datetime
-    expires_at: datetime
 
 
 class SessionState(str, Enum):
@@ -28,64 +19,95 @@ class SessionState(str, Enum):
     EXPIRED = "expired"
 
 
+@dataclass(frozen=True)
+class ConfirmationSession:
+    session_id: str
+    proposal_id: str
+    proposal_fingerprint: str
+    created_at: datetime
+    expires_at: datetime
+    state: SessionState = SessionState.PENDING
+
+
+class ConfirmationResultCode(str, Enum):
+    APPROVED = "approved"
+    CANCELLED = "cancelled"
+    CLOSED = "closed"
+    REVISE_REQUESTED = "revise_requested"
+    EXPIRED = "expired"
+    SESSION_NOT_FOUND = "session_not_found"
+    SESSION_NOT_PENDING = "session_not_pending"
+    PROPOSAL_MISMATCH = "proposal_mismatch"
+    FINGERPRINT_MISMATCH = "fingerprint_mismatch"
+    POLICY_DENIED = "policy_denied"
+    INVALID_RESPONSE = "invalid_response"
+
+
+@dataclass(frozen=True)
+class ConfirmationResult:
+    success: bool
+    reason: ConfirmationResultCode
+    grant: ExecutionGrant | None = None
+
+
 class ConfirmationGate:
-    """Connects policy validation, user decisions, grants, and safe audit events."""
-    def __init__(self, policy=None, grants=None, audit=None):
+    """Owns the only grant-recording closure and serializes session decisions."""
+    def __init__(self, policy=None, grants=None, audit=None, now=None, session_id_factory=None):
         self.policy = policy or PolicyGate()
-        self.grants = grants or ExecutionGrantStore()
-        issuer = ExecutionGrantIssuer(self.grants)
-        self._issue_grant = lambda proposal, session_id: issuer._issue(_new_approved_capability(session_id, proposal), proposal)
         self.audit = audit
-        self._sessions = {}
-        self._lock = threading.Lock()
+        self.now = now or (lambda: datetime.now(timezone.utc))
+        self.session_id_factory = session_id_factory or (lambda: secrets.token_urlsafe(18))
+        self._sessions: dict[str, ConfirmationSession] = {}
+        self._lock = threading.RLock()
+        self.grants = grants or ExecutionGrantStore(policy=self.policy, session_lookup=self._sessions.get)
 
-    def prepare(self, contract: ToolContract, proposal: ActionProposal):
+    def prepare(self, contract, proposal):
         result = self.policy.evaluate(contract, proposal)
-        if result.decision is PolicyDecision.REQUIRE_CONFIRMATION:
-            now = datetime.now(timezone.utc)
-            session = ConfirmationSession(secrets.token_urlsafe(18), proposal.proposal_id, proposal.fingerprint, now, min(proposal.expires_at, now + timedelta(seconds=90)))
-            with self._lock:
-                self._sessions[session.session_id] = (session, SessionState.PENDING)
-            self._audit("confirmation_shown", proposal, "ok")
-            return result, session
-        self._audit("policy_allowed_read_only" if result.decision is PolicyDecision.ALLOW_READ_ONLY else "policy_confirmation_required" if result.decision is PolicyDecision.REQUIRE_CONFIRMATION else "policy_denied", proposal, result.reason)
-        return result, None
-
-    def decide(self, contract: ToolContract, proposal: ActionProposal, decision: ConfirmationDecision, session_id: str | None = None) -> ExecutionGrant | None:
-        if decision is ConfirmationDecision.APPROVE:
-            with self._lock:
-                session_state = self._sessions.get(session_id or "")
-                if session_state is None or session_state[1] is not SessionState.PENDING or session_state[0].proposal_id != proposal.proposal_id or session_state[0].proposal_fingerprint != proposal.fingerprint:
-                    return None
-        if decision is not ConfirmationDecision.APPROVE:
-            event_name = {ConfirmationDecision.CANCEL: "confirmation_cancelled", ConfirmationDecision.CLOSED: "confirmation_closed", ConfirmationDecision.REVISE: "confirmation_revise_requested", ConfirmationDecision.EXPIRED: "proposal_expired"}.get(decision, "policy_denied")
-            if session_id:
-                with self._lock:
-                    current = self._sessions.get(session_id)
-                    if current is not None and current[1] is SessionState.PENDING:
-                        state = {ConfirmationDecision.CANCEL: SessionState.CANCELLED, ConfirmationDecision.CLOSED: SessionState.CLOSED, ConfirmationDecision.REVISE: SessionState.REVISE_REQUESTED, ConfirmationDecision.EXPIRED: SessionState.EXPIRED}.get(decision, SessionState.EXPIRED)
-                        self._sessions[session_id] = (current[0], state)
-            self._audit(event_name, proposal, decision.value)
-            return None
+        if result.decision is not PolicyDecision.REQUIRE_CONFIRMATION:
+            self._audit("policy_allowed_read_only" if result.decision is PolicyDecision.ALLOW_READ_ONLY else "policy_denied", proposal, result.reason)
+            return result, None
+        now = self.now()
+        session = ConfirmationSession(self.session_id_factory(), proposal.proposal_id, proposal.fingerprint, now, min(proposal.expires_at, now + timedelta(seconds=90)))
         with self._lock:
-            session_state = self._sessions.get(session_id or "")
-            if session_state is None or session_state[1] is not SessionState.PENDING:
-                return None
-            result = self.policy.evaluate(contract, proposal)
-            if result.decision is not PolicyDecision.REQUIRE_CONFIRMATION:
-                self._audit("policy_denied", proposal, result.reason)
-                return None
-            grant = self._issue_grant(proposal, session_id or "")
-            self._sessions[session_id] = (session_state[0], SessionState.APPROVED)
-        self._audit("confirmation_approved", proposal, "ok", grant)
-        self._audit("grant_issued", proposal, "ok", grant)
-        return grant
+            self._sessions[session.session_id] = session
+        self._audit("policy_confirmation_required", proposal, "confirmation_required")
+        self._audit("confirmation_shown", proposal, "ok")
+        return result, session
+
+    @staticmethod
+    def _state(session, state):
+        return ConfirmationSession(session.session_id, session.proposal_id, session.proposal_fingerprint, session.created_at, session.expires_at, state)
+
+    def decide(self, contract: ToolContract, proposal: ActionProposal, response: ConfirmationResponse) -> ConfirmationResult:
+        if not isinstance(response, ConfirmationResponse): return ConfirmationResult(False, ConfirmationResultCode.INVALID_RESPONSE)
+        with self._lock:
+            session = self._sessions.get(response.session_id)
+            if session is None: return ConfirmationResult(False, ConfirmationResultCode.SESSION_NOT_FOUND)
+            if session.state is not SessionState.PENDING: return ConfirmationResult(False, ConfirmationResultCode.SESSION_NOT_PENDING)
+            if session.proposal_id != proposal.proposal_id or response.proposal_id != proposal.proposal_id: return ConfirmationResult(False, ConfirmationResultCode.PROPOSAL_MISMATCH)
+            if session.proposal_fingerprint != proposal.fingerprint or response.displayed_fingerprint != proposal.fingerprint: return ConfirmationResult(False, ConfirmationResultCode.FINGERPRINT_MISMATCH)
+            if self.now() >= min(session.expires_at, proposal.expires_at):
+                self._sessions[session.session_id] = self._state(session, SessionState.EXPIRED)
+                self._audit("proposal_expired", proposal, "expired")
+                return ConfirmationResult(False, ConfirmationResultCode.EXPIRED)
+            if response.decision is not ConfirmationDecision.APPROVE:
+                states = {ConfirmationDecision.CANCEL: (SessionState.CANCELLED, ConfirmationResultCode.CANCELLED), ConfirmationDecision.CLOSED: (SessionState.CLOSED, ConfirmationResultCode.CLOSED), ConfirmationDecision.REVISE: (SessionState.REVISE_REQUESTED, ConfirmationResultCode.REVISE_REQUESTED), ConfirmationDecision.EXPIRED: (SessionState.EXPIRED, ConfirmationResultCode.EXPIRED)}
+                state, code = states.get(response.decision, (SessionState.CANCELLED, ConfirmationResultCode.INVALID_RESPONSE))
+                self._sessions[session.session_id] = self._state(session, state)
+                event_name = {ConfirmationDecision.CANCEL: "confirmation_cancelled", ConfirmationDecision.CLOSED: "confirmation_closed", ConfirmationDecision.REVISE: "confirmation_revise_requested", ConfirmationDecision.EXPIRED: "proposal_expired"}[response.decision]
+                self._audit(event_name, proposal, code.value)
+                return ConfirmationResult(False, code)
+            if self.policy.evaluate(contract, proposal).decision is not PolicyDecision.REQUIRE_CONFIRMATION:
+                return ConfirmationResult(False, ConfirmationResultCode.POLICY_DENIED)
+            try:
+                grant = self.grants._record_grant(proposal, session.session_id)
+            except Exception:
+                return ConfirmationResult(False, ConfirmationResultCode.POLICY_DENIED)
+            self._sessions[session.session_id] = self._state(session, SessionState.APPROVED)
+            self._audit("confirmation_approved", proposal, "approved", grant)
+            self._audit("grant_issued", proposal, "issued", grant)
+            return ConfirmationResult(True, ConfirmationResultCode.APPROVED, grant)
 
     def _audit(self, event_type, proposal, code, grant=None):
-        if self.audit is not None:
-            self.audit.write(AuditEvent(event_type, code, task_id=proposal.task_id, proposal_id=proposal.proposal_id,
-                                        proposal_fingerprint=proposal.fingerprint, grant_id=grant.grant_id if grant else "",
-                                        tool_name=proposal.tool_name, tool_version=proposal.tool_version,
-                                        operation=proposal.operation, side_effect=proposal.side_effect.value,
-                                        confirmation_type=proposal.confirmation_type.value,
-                                        requires_admin=proposal.requires_admin, reversible=proposal.reversible))
+        if self.audit:
+            self.audit.write(AuditEvent(event_type, code, task_id=proposal.task_id, proposal_id=proposal.proposal_id, proposal_fingerprint=proposal.fingerprint, grant_id=grant.grant_id if grant else "", tool_name=proposal.tool_name, tool_version=proposal.tool_version, operation=proposal.operation, side_effect=proposal.side_effect.value, confirmation_type=proposal.confirmation_type.value, requires_admin=proposal.requires_admin, reversible=proposal.reversible))
