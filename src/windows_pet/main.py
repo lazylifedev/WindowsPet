@@ -13,6 +13,7 @@ from .storage import constrain_to_primary, load_position, save_position
 from .file_search_settings_window import FileSearchSettingsWindow
 from .search_results_window import SearchResultsWindow
 from .search_result_store import SearchResultStore
+from .openai_settings_window import OpenAISettingsWindow
 
 
 class PetWindow(QWidget):
@@ -33,6 +34,7 @@ class PetWindow(QWidget):
         self.search_store = SearchResultStore()
         self.search_settings_window = None
         self.search_results_window = None
+        self.openai_settings_window = None
         self.input_bubble.search_completed.connect(self._on_search_completed)
         self._pet_hovered = False; self._input_hovered = False; self._input_has_focus = False
         self._draft_exists = False; self._api_request_in_progress = False
@@ -154,11 +156,12 @@ class PetWindow(QWidget):
         if event.button() == Qt.LeftButton: self.open_chat()
     def contextMenuEvent(self, event: QContextMenuEvent):
         menu = QMenu(self)
+        menu.addAction('OpenAI API 設定', self.open_openai_settings)
         menu.addAction('ファイル検索設定', self.open_file_search_settings)
         recent = menu.addAction('最近の検索結果', self.show_recent_search)
         recent.setEnabled(self.search_store.latest() is not None)
         cancel = menu.addAction('検索をキャンセル', self.input_bubble.cancel_search)
-        cancel.setEnabled(self.input_bubble.pending)
+        cancel.setEnabled(self.input_bubble.search_in_progress)
         menu.addSeparator()
         menu.addAction('チャットを開く', self.open_chat)
         menu.addAction('チャットを閉じる', self.close_chat)
@@ -166,15 +169,15 @@ class PetWindow(QWidget):
         menu.addAction('Reset position', self.reset_position)
         menu.addAction('Quit', QApplication.instance().quit)
         menu.exec(event.globalPos())
-        return
-        menu = QMenu(self)
-        for text, name in (("Play wave", "wave"), ("Play thinking", "thinking"), ("Play sleep", "sleep")): menu.addAction(text, lambda n=name: self.play(n))
-        menu.addSeparator(); menu.addAction("チャットを開く", self.open_chat); menu.addAction("チャットを閉じる", self.close_chat); menu.addAction("Conversation history", self.input_bubble.show_history); menu.addAction("Reset position", self.reset_position); menu.addAction("Quit", QApplication.instance().quit); menu.exec(event.globalPos())
     def reset_position(self): self.move(100, 100); self._activity()
     def open_file_search_settings(self):
         if self.search_settings_window is None:
             self.search_settings_window = FileSearchSettingsWindow(parent=self)
         self.search_settings_window.show(); self.search_settings_window.raise_(); self.search_settings_window.activateWindow()
+    def open_openai_settings(self):
+        if self.openai_settings_window is None:
+            self.openai_settings_window = OpenAISettingsWindow(self)
+        self.openai_settings_window.show(); self.openai_settings_window.raise_(); self.openai_settings_window.activateWindow()
     def show_recent_search(self):
         session = self.search_store.latest()
         if session:

@@ -61,6 +61,20 @@ def test_duplicate_send_is_blocked_and_response_streams(qapp):
     assert not chat.pending and chat.conversation.messages()[-1]["role"] == "assistant"
     chat.close()
 
+def test_search_state_only_enables_search_cancel(qapp):
+    chat = make_chat(qapp)
+    assert not chat.search_in_progress and chat.cancel_search() is False
+    chat._on_search_started(); assert chat.search_in_progress
+    chat._on_search_completed({}); assert not chat.search_in_progress
+    chat._on_finished("done"); assert chat.send_button.isEnabled()
+    chat.close()
+
+def test_failed_request_resets_search_state_and_input(qapp):
+    chat = make_chat(qapp); chat._on_search_started(); assert chat.search_in_progress
+    chat._on_failed("network", "接続できませんでした")
+    assert not chat.search_in_progress and chat.send_button.isEnabled() and not chat.pending
+    chat.close()
+
 
 def test_clear_is_blocked_during_request_and_history_reflects_conversation(qapp):
     chat = make_chat(qapp); chat.conversation.add_user("question"); chat.conversation.add_assistant("answer")
@@ -129,6 +143,7 @@ def test_position_spec_edges_and_api_error_mapping(monkeypatch):
     assert response_position(QRect(400, 0, 100, 100), screen, (280, 100)).y() > 100
     assert _error(RuntimeError("401 unauthorized")).kind == "auth"
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("windows_pet.ai_client.get_api_key", lambda: None)
     try: AIClient()
     except AIClientError as exc: assert exc.kind == "missing_key"
     else: assert False

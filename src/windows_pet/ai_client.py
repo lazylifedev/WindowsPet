@@ -9,6 +9,7 @@ from .file_search_models import SearchRequest
 from .file_search_service import FileSearchService
 from .file_search_settings import SearchSettings
 from .tool_dispatcher import ToolDispatcher
+from .openai_credentials import get_api_key
 
 INSTRUCTIONS = """あなたはWindows上で動作する小さくて親しみやすいデスクトップアシスタントです。
 基本的に日本語で、簡潔かつ正確に回答してください。
@@ -38,8 +39,8 @@ def _error(exc: Exception) -> AIClientError:
     return AIClientError("server", "OpenAI APIで一時的なエラーが発生しました。")
 
 class AIClient:
-    def __init__(self, client=None, timeout: float = 60.0):
-        key = os.getenv("OPENAI_API_KEY")
+    def __init__(self, client=None, timeout: float = 60.0, api_key: str | None = None):
+        key = api_key or get_api_key()
         if not key:
             raise AIClientError("missing_key", "OpenAI APIキーが設定されていません。")
         self.client = client or OpenAI(api_key=key, timeout=timeout, max_retries=0)

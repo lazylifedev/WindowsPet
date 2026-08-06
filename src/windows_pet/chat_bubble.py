@@ -122,9 +122,9 @@ class InputBubble(BubbleFrame):
     pointer_left = Signal()
     focus_state_changed = Signal(bool)
     draft_state_changed = Signal(bool)
-    closed=Signal(); send_started=Signal(); send_finished=Signal(); search_completed=Signal(dict)
+    closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict)
     def __init__(self, pet):
-        super().__init__(); self.pet=pet; self._pending=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False
+        super().__init__(); self.pet=pet; self._pending=False; self._search_in_progress=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.card=QFrame(self); self.card.setStyleSheet('QFrame{background:#20242b;border:0;}')
         # A layered top-level window must never receive an effect whose expanded
@@ -155,6 +155,8 @@ class InputBubble(BubbleFrame):
         return super().eventFilter(watched, qt_event)
     @property
     def pending(self): return self._pending
+    @property
+    def search_in_progress(self): return self._search_in_progress
     def cancel_search(self):
         worker = self._worker
         if worker is not None and hasattr(worker, 'cancel'):
@@ -180,7 +182,7 @@ class InputBubble(BubbleFrame):
         self._reply_text=''
         self.input.clear(); self.conversation.add_user(text); self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking'); self.response_bubble.setText('考え中…'); self._position_response(); self.response_bubble.show()
         self._thread=QThread(self); self._worker=AIWorker(self.conversation.messages()); self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.search_completed.connect(self.search_completed)
+        self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.search_started.connect(self._on_search_started); self._worker.search_completed.connect(self._on_search_completed)
         self._worker.finished.connect(self._on_finished); self._worker.failed.connect(self._on_failed); self._worker.finished.connect(self._thread.quit); self._worker.failed.connect(self._thread.quit); self._thread.finished.connect(self._thread_done); self._thread.start(); return True
     def _position_response(self):
         if not hasattr(self.pet, 'frameGeometry'): return
@@ -199,6 +201,8 @@ class InputBubble(BubbleFrame):
         position.setY(min(max(position.y(), area.top()), area.bottom() - r.height() + 1))
         r.set_tail_x(pet_rect.center().x() - position.x())
         r.move(position)
+    def _on_search_started(self): self._search_in_progress=True; self.search_started.emit()
+    def _on_search_completed(self, result): self._search_in_progress=False; self.search_completed.emit(result)
     def _on_delta(self,text): self._reply_text+=text; self.response.setText(self._reply_text); self.response_bubble.setText(self._reply_text); self._position_response()
     def _on_finished(self,text):
         self.response.setText(text); self.response_bubble.setText(text); self._position_response(); self.conversation.add_assistant(text)
@@ -206,7 +210,7 @@ class InputBubble(BubbleFrame):
         self._complete()
     def _on_failed(self,kind,message): self.response.setText(message); self.response_bubble.setText(message); self._position_response(); self._complete()
     def _complete(self):
-        self._pending=False; self.send_button.setEnabled(True); self.send_finished.emit(); self.pet.play('idle')
+        self._pending=False; self._search_in_progress=False; self.send_button.setEnabled(True); self.send_finished.emit(); self.pet.play('idle')
         if not self.response_pinned: QTimer.singleShot(12000,self._auto_hide_response)
     def _auto_hide_response(self):
         if not self._pending and not self.response_pinned:self.response_bubble.hide()
