@@ -27,9 +27,19 @@ class PetWindow(QWidget):
         self._timer = QTimer(self); self._timer.timeout.connect(self._next_frame)
         self._animation = None; self._frame = 0
         self.input_bubble = InputBubble(self)
+        self._pet_hovered = False; self._input_hovered = False; self._input_has_focus = False
+        self._draft_exists = False; self._api_request_in_progress = False
+        self._input_hide_timer = QTimer(self); self._input_hide_timer.setSingleShot(True); self._input_hide_timer.timeout.connect(self._hide_input_if_allowed)
+        self.input_bubble.pointer_entered.connect(lambda: self._set_input_hovered(True))
+        self.input_bubble.pointer_left.connect(lambda: self._set_input_hovered(False))
+        self.input_bubble.focus_state_changed.connect(self._set_input_focus)
+        self.input_bubble.draft_state_changed.connect(lambda v: setattr(self, '_draft_exists', v))
+        self.input_bubble.send_started.connect(lambda: setattr(self, '_api_request_in_progress', True))
+        self.input_bubble.send_finished.connect(lambda: setattr(self, '_api_request_in_progress', False))
         self.play("idle"); self._last_activity.start(30000)
 
     def play(self, name: str):
+        if name == "sleep" and not self._can_sleep(): return
         if name not in self.animations: return
         self._animation, self._frame = self.animations[name], 0; self._timer.stop(); self._show_frame(); self._timer.start(round(1000 / self._animation.fps))
         if name != "sleep" and not self.input_bubble.isVisible() and not self.input_bubble.pending: self._last_activity.start(30000)
@@ -45,6 +55,29 @@ class PetWindow(QWidget):
     def _activity(self):
         if self._animation.name == "sleep": self.play("idle")
         if not self.input_bubble.isVisible() and not self.input_bubble.pending: self._last_activity.start(30000)
+
+    def _can_sleep(self):
+        return not (self._pet_hovered or self._input_hovered or self._input_has_focus or self._draft_exists or self._api_request_in_progress)
+    def _set_input_hovered(self, value):
+        self._input_hovered = value
+        if value: self._input_hide_timer.stop()
+        else: self.schedule_input_bubble_hide()
+    def _set_input_focus(self, value):
+        self._input_has_focus = value
+        if value: self._input_hide_timer.stop()
+        else: self.schedule_input_bubble_hide()
+    def should_keep_input_bubble_visible(self):
+        return not self._can_sleep()
+    def schedule_input_bubble_hide(self):
+        if self.input_bubble.isVisible() and not self.should_keep_input_bubble_visible(): self._input_hide_timer.start(500)
+    def cancel_input_bubble_hide(self): self._input_hide_timer.stop()
+    def _hide_input_if_allowed(self):
+        if not self.should_keep_input_bubble_visible(): self._hide_chat_bubble()
+
+    def enterEvent(self, event):
+        self._pet_hovered = True; self.cancel_input_bubble_hide(); self._activity(); self._show_chat_bubble(); super().enterEvent(event)
+    def leaveEvent(self, event):
+        self._pet_hovered = False; self.schedule_input_bubble_hide(); super().leaveEvent(event)
     def open_chat(self):
         if not self.input_bubble.isVisible():
             self._show_chat_bubble()

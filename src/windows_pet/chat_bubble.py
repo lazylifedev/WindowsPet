@@ -11,7 +11,7 @@ from .conversation import Conversation
 MIN_INPUT_HEIGHT, MAX_INPUT_HEIGHT = 52, 140
 TAIL_WIDTH, TAIL_HEIGHT = 14, 18
 SHADOW_BLUR, SHADOW_OFFSET_Y = 12, 3
-RESPONSE_GAP = 4
+RESPONSE_GAP = 6
 
 def chat_position(pet_rect: QRect, available: QRect, size=(280, MIN_INPUT_HEIGHT)) -> QPoint:
     width, height = size
@@ -37,7 +37,7 @@ def response_position(pet_rect: QRect, available: QRect, size) -> QPoint:
     x = pet_rect.center().x() - width // 2
     y = pet_rect.top() - height - RESPONSE_GAP
     if y < available.top():
-        y = pet_rect.bottom() + 1 + 8
+        y = pet_rect.bottom() + 1 + RESPONSE_GAP
     return QPoint(min(max(x, available.left()), available.right() - width + 1),
                   min(max(y, available.top()), available.bottom() - height + 1))
 
@@ -68,6 +68,9 @@ class BubbleFrame(QWidget):
     def set_tail_x(self, x):
         self._tail_x = max(9, min(self.width() - 9, int(x))) if self.width() else int(x)
         self.update()
+
+    def tail_tip_local_y(self):
+        return 0 if self._tail_direction == "top" else self.height()
 
     def paintEvent(self, event):
         p = QPainter(self); p.setRenderHint(QPainter.Antialiasing)
@@ -107,6 +110,10 @@ class HistoryWindow(QDialog):
         layout.addStretch(); area.setWidget(body); QVBoxLayout(self).addWidget(area)
 
 class InputBubble(BubbleFrame):
+    pointer_entered = Signal()
+    pointer_left = Signal()
+    focus_state_changed = Signal(bool)
+    draft_state_changed = Signal(bool)
     closed=Signal(); send_started=Signal(); send_finished=Signal()
     def __init__(self, pet):
         super().__init__(); self.pet=pet; self._pending=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False
@@ -123,7 +130,19 @@ class InputBubble(BubbleFrame):
         row.addWidget(self.input); row.addWidget(self.send_button,0,Qt.AlignBottom); self.input.textChanged.connect(self._adjust_input_height); self.input.submit.connect(self.send_message); self.send_button.clicked.connect(self.send_message); self._adjust_input_height()
         self.response=QLabel(''); self.response.hide()
         self.response_bubble=ResponseBubble(); self.response_bubble.hide(); self._reply_text=''
+        self.input.textChanged.connect(lambda: self.draft_state_changed.emit(bool(self.input.toPlainText().strip())))
+        self.input.installEventFilter(self)
         self.hide()
+    def enterEvent(self, event):
+        self.pointer_entered.emit(); super().enterEvent(event)
+    def leaveEvent(self, event):
+        self.pointer_left.emit(); super().leaveEvent(event)
+    def eventFilter(self, watched, event):
+        if watched is self.input and event.type() == event.FocusIn:
+            self.focus_state_changed.emit(True)
+        elif watched is self.input and event.type() == event.FocusOut:
+            self.focus_state_changed.emit(False)
+        return super().eventFilter(watched, event)
     @property
     def pending(self): return self._pending
     def show_history(self): self.history_window=HistoryWindow(self.conversation); self.history_window.show()
@@ -146,8 +165,15 @@ class InputBubble(BubbleFrame):
     def _position_response(self):
         if not hasattr(self.pet, 'frameGeometry'): return
         screen=self.pet.screen() if hasattr(self.pet, 'screen') else None; area=(screen or QApplication.primaryScreen()).availableGeometry(); r=self.response_bubble
-        position = response_position(self.pet.frameGeometry(), area, r.size())
-        r.set_tail_direction("bottom" if position.y() < self.pet.frameGeometry().top() else "top")
+        pet_rect = self.pet.frameGeometry()
+        position = response_position(pet_rect, area, r.size())
+        r.set_tail_direction("bottom" if position.y() < pet_rect.top() else "top")
+        # Recompute from the actual tail tip, so the visual gap is independent
+        # of the bubble's shadow/panel margins and of streaming resizes.
+        target_y = pet_rect.top() - RESPONSE_GAP if r._tail_direction == "bottom" else pet_rect.bottom() + 1 + RESPONSE_GAP
+        position.setY(target_y - r.tail_tip_local_y())
+        position.setX(pet_rect.center().x() - r.width() // 2)
+        position.setX(min(max(position.x(), area.left()), area.right() - r.width() + 1))
         r.set_tail_x(self.pet.frameGeometry().center().x() - position.x())
         r.move(position)
     def _on_delta(self,text): self._reply_text+=text; self.response.setText(self._reply_text); self.response_bubble.setText(self._reply_text); self._position_response()
