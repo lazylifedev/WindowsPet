@@ -135,10 +135,11 @@ def test_history_actions_resync_after_completion_and_failure(qapp):
     chat.show_history(); history = chat.history_window; qapp.processEvents()
     chat.input.setPlainText('new'); assert chat.send_message() is True
     assert not history.clear_button.isEnabled()
-    chat._on_finished('answer'); assert history.clear_button.isEnabled()
+    chat._on_finished('answer'); qapp.processEvents(); assert history.clear_button.isEnabled()
     before = chat.conversation.messages(); chat.input.setPlainText('again'); assert chat.send_message() is True
     chat._on_failed('cancelled', 'キャンセル'); assert history.clear_button.isEnabled()
-    assert chat.conversation.messages() == before + [{'role': 'user', 'content': 'again'}]
+    assert chat.conversation.messages() == before
+    assert chat._retry_text == 'again'
     close_chat(chat, qapp)
 
 

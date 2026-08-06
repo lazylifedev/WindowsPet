@@ -133,10 +133,15 @@ class ResponseBubble(BubbleFrame):
         self._build_context_menu().exec(self.label.mapToGlobal(position))
     def _build_context_menu(self):
         menu = QMenu(self)
+        parent = self.parent()
+        if getattr(parent, '_retry_text', None):
+            retry_action = menu.addAction('再試行')
+            retry_action.setEnabled(self._actions_enabled and not self._pending_parent())
+            retry_action.triggered.connect(parent.retry_last_request)
         copy_action = menu.addAction('回答をコピー')
         copy_action.setEnabled(self._actions_enabled and self._copy_enabled)
         copy_action.triggered.connect(lambda: QApplication.clipboard().setText(self.toPlainText()))
-        pin_action = menu.addAction('固定を解除' if getattr(self.parent(), 'response_pinned', False) else '回答を固定')
+        pin_action = menu.addAction('固定を解除' if getattr(parent, 'response_pinned', False) else '回答を固定')
         pin_action.setEnabled(self._actions_enabled and not self._pending_parent())
         pin_action.triggered.connect(self._toggle_pin)
         menu.addSeparator()
@@ -231,7 +236,7 @@ class InputBubble(BubbleFrame):
     draft_state_changed = Signal(bool)
     closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict)
     def __init__(self, pet, worker_factory=AIWorker):
-        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self._pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False
+        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self._pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False; self._active_user_text=None; self._retry_text=None
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.card=QFrame(self); self.card.setStyleSheet('QFrame{background:#20242b;border:0;}')
         # A layered top-level window must never receive an effect whose expanded
@@ -281,6 +286,7 @@ class InputBubble(BubbleFrame):
     def clear_messages(self):
         if self._pending:return False
         self.conversation.clear()
+        self._retry_text=None
         self._refresh_history_window()
         return True
     def set_response_pinned(self, pinned):
@@ -292,6 +298,7 @@ class InputBubble(BubbleFrame):
     def close_response(self):
         if self._pending: return False
         self.response_pinned = False
+        self._retry_text = None
         self._response_generation += 1
         self.response_bubble.hide()
         return True
@@ -303,11 +310,23 @@ class InputBubble(BubbleFrame):
         if self.isVisible() and hasattr(self.pet, "reposition_input_bubble"):
             self.pet.reposition_input_bubble()
     def send_message(self):
-        if self._pending:return False
+        if not self._can_start_request():return False
         text=self.input.toPlainText().strip()
         if not text:return False
+        self._retry_text=None
+        return self._start_request(text, clear_input=True)
+    def retry_last_request(self):
+        if not self._retry_text:return False
+        return self._start_request(self._retry_text, clear_input=False)
+    def _can_start_request(self):
+        return not self._pending and not (self._thread is not None and self._thread.isRunning())
+    def _start_request(self, text, *, clear_input):
+        if not text or not self._can_start_request(): return False
         self._reply_text=''; self._search_status_active=False; self.response_pinned=False; self._response_generation += 1
-        self.input.clear(); self.conversation.add_user(text); self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking'); self.response_bubble.setText('考え中…'); self._position_response(); self.response_bubble.show()
+        if clear_input: self.input.clear()
+        self._active_user_text=text
+        if clear_input: self.input.clear()
+        self.conversation.add_user(text); self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking'); self.response_bubble.setText('考え中…'); self._position_response(); self.response_bubble.show()
         self._refresh_history_window()
         self._thread=QThread(self); self._worker=self._worker_factory(self.conversation.messages()); self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.search_started.connect(self._on_search_started); self._worker.search_completed.connect(self._on_search_completed)
@@ -353,13 +372,18 @@ class InputBubble(BubbleFrame):
         self._reply_text+=text; self.response.setText(self._reply_text); self.response_bubble.setText(self._reply_text); self.response_bubble.set_copy_enabled(False); self.response_bubble.set_actions_enabled(False); self._position_response()
     def _on_finished(self,text):
         self._search_status_active=False
+        self._active_user_text=None
         self.response.setText(text); self.response_bubble.setText(text); self.response_bubble.set_copy_enabled(bool(text.strip())); self.response_bubble.set_actions_enabled(bool(text.strip())); self._position_response(); self.conversation.add_assistant(text)
         self._refresh_history_window()
         if not text.strip(): self.response_bubble.hide()
         self._complete()
-    def _on_failed(self,kind,message): self.response.setText(message); self.response_bubble.setText(message); self.response_bubble.set_copy_enabled(bool(message.strip())); self.response_bubble.set_actions_enabled(bool(message.strip())); self._position_response(); self._complete()
+    def _on_failed(self,kind,message):
+        active=self._active_user_text
+        if active is not None and self.conversation.remove_last_user(active): self._retry_text=active
+        self._active_user_text=None
+        self.response.setText(message); self.response_bubble.setText(message); self.response_bubble.set_copy_enabled(bool(message.strip())); self.response_bubble.set_actions_enabled(bool(message.strip())); self._position_response(); self._complete()
     def _complete(self):
-        self._pending=False; self._search_in_progress=False; self.send_button.setEnabled(True); self.send_finished.emit(); self.pet.play('idle')
+        self._pending=False; self._search_in_progress=False; self.send_button.setEnabled(self._thread is None or not self._thread.isRunning()); self.send_finished.emit(); self.pet.play('idle')
         self._refresh_history_window(refresh_messages=False)
         if not self.response_pinned: self._schedule_response_auto_hide()
     def _schedule_response_auto_hide(self):
@@ -369,12 +393,13 @@ class InputBubble(BubbleFrame):
     def _auto_hide_response(self, generation=None):
         if generation is not None and generation != self._response_generation: return
         if not self._pending and not self.response_pinned:self.response_bubble.hide()
-    def _thread_done(self): self._thread=None; self._worker=None
+    def _thread_done(self): self._thread=None; self._worker=None; self.send_button.setEnabled(not self._pending)
     def closeEvent(self,event):
         worker, thread = self._worker, self._thread
         if worker is not None and hasattr(worker, "cancel"): worker.cancel()
         if thread and thread.isRunning(): thread.quit(); thread.wait(2000)
         if thread and not thread.isRunning(): self._thread, self._worker = None, None
+        self._retry_text = None
         if getattr(self, 'history_window', None) is not None: self.history_window.close()
         self.response_bubble.close(); self.closed.emit(); super().closeEvent(event)
 
