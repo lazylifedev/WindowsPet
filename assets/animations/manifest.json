@@ -1,0 +1,352 @@
+{
+  "canvas_size": [
+    512,
+    512
+  ],
+  "bottom_margin": 28,
+  "animations": {
+    "wave": {
+      "frame_count": 4,
+      "fps_recommended": 6,
+      "loop": true,
+      "frames": [
+        {
+          "file": "frame_01.png",
+          "source_segment": [
+            140,
+            404
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            303,
+            265,
+            607
+          ],
+          "placed_at": [
+            123,
+            180
+          ],
+          "sprite_size": [
+            265,
+            304
+          ]
+        },
+        {
+          "file": "frame_02.png",
+          "source_segment": [
+            531,
+            797
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            304,
+            267,
+            606
+          ],
+          "placed_at": [
+            122,
+            182
+          ],
+          "sprite_size": [
+            267,
+            302
+          ]
+        },
+        {
+          "file": "frame_03.png",
+          "source_segment": [
+            872,
+            1157
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            302,
+            286,
+            606
+          ],
+          "placed_at": [
+            113,
+            180
+          ],
+          "sprite_size": [
+            286,
+            304
+          ]
+        },
+        {
+          "file": "frame_04.png",
+          "source_segment": [
+            1190,
+            1461
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            302,
+            272,
+            606
+          ],
+          "placed_at": [
+            120,
+            180
+          ],
+          "sprite_size": [
+            272,
+            304
+          ]
+        }
+      ]
+    },
+    "idle": {
+      "frame_count": 4,
+      "fps_recommended": 4,
+      "loop": true,
+      "frames": [
+        {
+          "file": "frame_01.png",
+          "source_segment": [
+            145,
+            406
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            336,
+            262,
+            632
+          ],
+          "placed_at": [
+            125,
+            188
+          ],
+          "sprite_size": [
+            262,
+            296
+          ]
+        },
+        {
+          "file": "frame_02.png",
+          "source_segment": [
+            529,
+            782
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            337,
+            254,
+            632
+          ],
+          "placed_at": [
+            129,
+            189
+          ],
+          "sprite_size": [
+            254,
+            295
+          ]
+        },
+        {
+          "file": "frame_03.png",
+          "source_segment": [
+            884,
+            1140
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            339,
+            257,
+            632
+          ],
+          "placed_at": [
+            127,
+            191
+          ],
+          "sprite_size": [
+            257,
+            293
+          ]
+        },
+        {
+          "file": "frame_04.png",
+          "source_segment": [
+            1205,
+            1458
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            337,
+            254,
+            631
+          ],
+          "placed_at": [
+            129,
+            190
+          ],
+          "sprite_size": [
+            254,
+            294
+          ]
+        }
+      ]
+    },
+    "sleep": {
+      "frame_count": 4,
+      "fps_recommended": 3,
+      "loop": true,
+      "frames": [
+        {
+          "file": "frame_01.png",
+          "source_segment": [
+            159,
+            406
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            375,
+            248,
+            629
+          ],
+          "placed_at": [
+            132,
+            230
+          ],
+          "sprite_size": [
+            248,
+            254
+          ]
+        },
+        {
+          "file": "frame_02.png",
+          "source_segment": [
+            506,
+            725
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            384,
+            220,
+            628
+          ],
+          "placed_at": [
+            146,
+            240
+          ],
+          "sprite_size": [
+            220,
+            244
+          ]
+        },
+        {
+          "file": "frame_03.png",
+          "source_segment": [
+            790,
+            1094
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            463,
+            305,
+            627
+          ],
+          "placed_at": [
+            103,
+            320
+          ],
+          "sprite_size": [
+            305,
+            164
+          ]
+        },
+        {
+          "file": "frame_04.png",
+          "source_segment": [
+            1133,
+            1438
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            388,
+            306,
+            623
+          ],
+          "placed_at": [
+            103,
+            249
+          ],
+          "sprite_size": [
+            306,
+            235
+          ]
+        }
+      ]
+    },
+    "thinking": {
+      "frame_count": 3,
+      "fps_recommended": 4,
+      "loop": true,
+      "frames": [
+        {
+          "file": "frame_01.png",
+          "source_segment": [
+            122,
+            419
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            320,
+            298,
+            665
+          ],
+          "placed_at": [
+            107,
+            139
+          ],
+          "sprite_size": [
+            298,
+            345
+          ]
+        },
+        {
+          "file": "frame_02.png",
+          "source_segment": [
+            564,
+            871
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            317,
+            308,
+            664
+          ],
+          "placed_at": [
+            102,
+            137
+          ],
+          "sprite_size": [
+            308,
+            347
+          ]
+        },
+        {
+          "file": "frame_03.png",
+          "source_segment": [
+            884,
+            1405
+          ],
+          "trim_bbox_within_segment": [
+            0,
+            296,
+            522,
+            664
+          ],
+          "placed_at": [
+            20,
+            152
+          ],
+          "sprite_size": [
+            472,
+            332
+          ]
+        }
+      ]
+    }
+  }
+}
