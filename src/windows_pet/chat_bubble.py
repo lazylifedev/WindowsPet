@@ -14,21 +14,22 @@ SHADOW_BLUR, SHADOW_OFFSET_Y = 12, 3
 
 def chat_position(pet_rect: QRect, available: QRect, size=(280, MIN_INPUT_HEIGHT)) -> QPoint:
     width, height = size
-    # Legacy callers that explicitly request a large chat rectangle retain the
-    # old side-placement contract; the real compact bubble uses the default.
-    if size != (280, MIN_INPUT_HEIGHT) and (width > 320 or height > 200):
-        right, left = pet_rect.right() + 12, pet_rect.left() - width - 12
-        x = right if right + width <= available.right() + 1 else left if left >= available.left() else min(max(right, available.left()), available.right() - width + 1)
-        y = min(max(pet_rect.center().y() - height // 2, available.top()), max(available.top(), available.bottom() - height + 1))
-        return QPoint(x, y)
     gap = 8
-    x = pet_rect.center().x() - width // 2
-    y = pet_rect.bottom() + 1 + gap
-    if y + height > available.bottom() + 1:
-        y = pet_rect.top() - height - gap
-    x = min(max(x, available.left()), available.right() - width + 1)
-    y = min(max(y, available.top()), available.bottom() - height + 1)
-    return QPoint(x, y)
+    max_x, max_y = available.right() - width + 1, available.bottom() - height + 1
+    centered_x = pet_rect.center().x() - width // 2
+    candidates = (
+        (min(max(centered_x, available.left()), max_x), pet_rect.bottom() + 1 + gap),
+        (pet_rect.right() + 1 + gap, pet_rect.bottom() - height + 1),
+        (pet_rect.left() - width - gap, pet_rect.bottom() - height + 1),
+        (min(max(centered_x, available.left()), max_x), pet_rect.top() - height - gap),
+    )
+    for x, y in candidates:
+        if (available.left() <= x <= max_x and available.top() <= y <= max_y):
+            return QPoint(x, y)
+    # If no preferred slot fits, retain the closest possible placement while
+    # keeping the complete translucent/shadow outer rect on-screen.
+    return QPoint(min(max(centered_x, available.left()), max_x),
+                  min(max(pet_rect.bottom() + 1 + gap, available.top()), max_y))
 
 def response_position(pet_rect: QRect, available: QRect, size) -> QPoint:
     width, height = (size.width(), size.height()) if hasattr(size, "width") else size
@@ -128,6 +129,8 @@ class InputBubble(BubbleFrame):
         line_h=self.input.fontMetrics().lineSpacing()
         doc_h=max(doc_h, self.input.document().blockCount() * line_h)
         height=max(48,min(MAX_INPUT_HEIGHT-10,int(doc_h+14))); self.input.setFixedHeight(height); self.adjustSize()
+        if self.isVisible() and hasattr(self.pet, "reposition_input_bubble"):
+            self.pet.reposition_input_bubble()
     def send_message(self):
         if self._pending:return False
         text=self.input.toPlainText().strip()

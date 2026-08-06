@@ -114,6 +114,21 @@ def test_position_spec_edges_and_api_error_mapping(monkeypatch):
     except AIClientError as exc: assert exc.kind == "missing_key"
     else: assert False
 
+def test_input_position_is_centered_below_and_tail_is_clamped(qapp):
+    chat = make_chat(qapp)
+    pet = type("Pet", (), {"frameGeometry": lambda self: QRect(0, 300, 100, 100),
+                            "screen": lambda self: qapp.primaryScreen()})()
+    chat.pet = pet
+    chat.adjustSize()
+    position = chat_position(pet.frameGeometry(), qapp.primaryScreen().availableGeometry(), (chat.width(), chat.height()))
+    assert position.y() > pet.frameGeometry().bottom()
+    assert position.x() == 0
+    chat.set_tail_x(-100)
+    assert chat._tail_x == 9
+    chat.set_tail_x(10000)
+    assert chat._tail_x == chat.width() - 9
+    chat.close()
+
 
 def test_pyinstaller_spec_includes_package_modules():
     spec = Path("WindowsPet.spec").read_text(encoding="utf-8")

@@ -63,13 +63,19 @@ class PetWindow(QWidget):
 
     def _show_chat_bubble(self):
         self.play("wave")
-        screen = self.screen() or QApplication.primaryScreen()
         self.input_bubble.adjustSize()
+        self.reposition_input_bubble()
+        self.input_bubble.show(); self.input_bubble.raise_(); self.input_bubble.activateWindow()
+
+    def reposition_input_bubble(self):
+        if not hasattr(self, "input_bubble"):
+            return
+        screen = self.screen() or QApplication.primaryScreen()
         position = chat_position(self.frameGeometry(), screen.availableGeometry(), (self.input_bubble.width(), self.input_bubble.height()))
         direction = "top" if position.y() > self.frameGeometry().bottom() else "bottom"
         self.input_bubble.set_tail_direction(direction)
         self.input_bubble.set_tail_x(self.frameGeometry().center().x() - position.x())
-        self.input_bubble.move(position); self.input_bubble.show(); self.input_bubble.raise_(); self.input_bubble.activateWindow()
+        self.input_bubble.move(position)
 
     def _hide_chat_bubble(self):
         self.input_bubble.hide()
@@ -78,7 +84,7 @@ class PetWindow(QWidget):
     def moveEvent(self, event):
         super().moveEvent(event)
         if self.input_bubble.isVisible():
-            screen = self.screen() or QApplication.primaryScreen(); position = chat_position(self.frameGeometry(), screen.availableGeometry(), (self.input_bubble.width(), self.input_bubble.height())); self.input_bubble.set_tail_direction("top" if position.y() > self.frameGeometry().bottom() else "bottom"); self.input_bubble.set_tail_x(self.frameGeometry().center().x() - position.x()); self.input_bubble.move(position)
+            self.reposition_input_bubble()
         if self.input_bubble.response_bubble.isVisible():
             screen = self.screen() or QApplication.primaryScreen(); r = self.input_bubble.response_bubble; area = screen.availableGeometry(); position = response_position(self.frameGeometry(), area, r.size()); r.set_tail_direction("bottom" if position.y() < self.frameGeometry().top() else "top"); r.set_tail_x(self.frameGeometry().center().x() - position.x()); r.move(position)
     def mousePressEvent(self, event: QMouseEvent):

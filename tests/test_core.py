@@ -37,11 +37,11 @@ def test_position_round_trip(tmp_path):
 def test_position_is_constrained():
     assert constrain_to_primary(QPoint(-50, 900), QRect(0, 0, 1920, 1080), 200) == QPoint(0, 880)
 
-def test_chat_position_prefers_right_then_left_and_clamps():
+def test_chat_position_prefers_below_then_alternatives_and_clamps():
     screen = QRect(0, 0, 1000, 800)
-    assert chat_position(QRect(100, 300, 100, 100), screen, (380, 460)).x() == 211
-    assert chat_position(QRect(850, 300, 100, 100), screen, (380, 460)).x() == 458
-    assert chat_position(QRect(400, 0, 100, 100), screen, (380, 460)).y() == 0
+    assert chat_position(QRect(100, 300, 100, 100), screen, (380, 100)).x() == 0
+    assert chat_position(QRect(850, 300, 100, 100), screen, (380, 100)).x() == 620
+    assert chat_position(QRect(400, 0, 100, 100), screen, (380, 460)).y() == 108
     assert chat_position(QRect(400, 750, 100, 50), screen, (380, 460)).y() == 340
 
 def test_chat_rejects_blank_and_blocks_duplicate(qapp):
