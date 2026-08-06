@@ -116,6 +116,33 @@ def test_position_spec_edges_and_api_error_mapping(monkeypatch):
     except AIClientError as exc: assert exc.kind == "missing_key"
     else: assert False
 
+def test_response_position_is_centered_for_short_and_long_text(qapp):
+    chat = make_chat(qapp)
+    pet = type("Pet", (), {"frameGeometry": lambda self: QRect(400, 300, 100, 100),
+                            "screen": lambda self: qapp.primaryScreen()})()
+    chat.pet = pet
+    for text in ("考え中…", "こんにちは！今日はどのようなお手伝いをしましょうか？\n詳しく説明します。" * 3):
+        chat.response_bubble.setText(text)
+        chat._position_response()
+        assert chat.response_bubble.x() + chat.response_bubble.width() / 2 == pet.frameGeometry().center().x()
+        assert chat.response_bubble.y() + chat.response_bubble.height() == pet.frameGeometry().top() - 4
+        assert chat.response_bubble._tail_direction == "bottom"
+        assert chat.response_bubble._tail_x == pet.frameGeometry().center().x() - chat.response_bubble.x()
+    chat.close()
+
+def test_response_stream_repositions_after_each_resize_and_clamps_edges(qapp):
+    chat = make_chat(qapp)
+    pet = type("Pet", (), {"frameGeometry": lambda self: self.rect,
+                            "screen": lambda self: qapp.primaryScreen()})()
+    for rect in (QRect(0, 300, 100, 100), QRect(900, 300, 100, 100)):
+        pet.rect = rect; chat.pet = pet; chat.response_bubble.setText("短文"); chat._position_response()
+        assert chat.response_bubble.x() >= qapp.primaryScreen().availableGeometry().left()
+        assert chat.response_bubble.x() + chat.response_bubble.width() <= qapp.primaryScreen().availableGeometry().right() + 1
+        assert chat.response_bubble._tail_x == max(9, min(chat.response_bubble.width() - 9, rect.center().x() - chat.response_bubble.x()))
+        old_x = chat.response_bubble.x(); chat._on_delta("長い回答です。" * 30)
+        assert chat.response_bubble.x() != old_x or chat.response_bubble.width() >= 90
+    chat.close()
+
 def test_input_position_is_centered_below_and_tail_is_clamped(qapp):
     chat = make_chat(qapp)
     pet = type("Pet", (), {"frameGeometry": lambda self: QRect(0, 300, 100, 100),
@@ -166,5 +193,5 @@ def test_pet_drag_does_not_toggle_and_edge_bubbles_have_valid_directions(qapp, t
     pet.move(0, 700); pet.toggle_chat_bubble(); qapp.processEvents()
     assert pet.input_bubble.isVisible() and pet.input_bubble._tail_direction == "bottom"
     pet.input_bubble.response_bubble.setText("reply"); pet.input_bubble._position_response(); pet.input_bubble.response_bubble.show(); qapp.processEvents()
-    assert pet.input_bubble.response_bubble._tail_direction == "top"
+    assert pet.input_bubble.response_bubble._tail_direction == "bottom"
     pet.close()

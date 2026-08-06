@@ -90,7 +90,13 @@ class ResponseBubble(BubbleFrame):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
     def setText(self, text):
-        self._text=text; self.label.setText(text); self.label.adjustSize(); self.resize(min(380, max(90, self.label.sizeHint().width()+28)), min(180, max(44, self.label.sizeHint().height()+TAIL_HEIGHT+8))); self.label.setGeometry(0, TAIL_HEIGHT, self.width(), self.height()-TAIL_HEIGHT)
+        self._text=text; self.label.setText(text); self.label.adjustSize(); self.resize(min(380, max(90, self.label.sizeHint().width()+28)), min(180, max(44, self.label.sizeHint().height()+TAIL_HEIGHT+8))); self._layout_label()
+    def set_tail_direction(self, direction):
+        super().set_tail_direction(direction)
+        self._layout_label()
+    def _layout_label(self):
+        margin = TAIL_HEIGHT if self._tail_direction == "top" else 0
+        self.label.setGeometry(0, margin, self.width(), max(0, self.height() - margin - (TAIL_HEIGHT if self._tail_direction == "bottom" else 0)))
 
 class HistoryWindow(QDialog):
     def __init__(self, conversation, parent=None):
@@ -140,13 +146,16 @@ class InputBubble(BubbleFrame):
     def _position_response(self):
         if not hasattr(self.pet, 'frameGeometry'): return
         screen=self.pet.screen() if hasattr(self.pet, 'screen') else None; area=(screen or QApplication.primaryScreen()).availableGeometry(); r=self.response_bubble
-        r.move(response_position(self.pet.frameGeometry(), area, r.size()))
-    def _on_delta(self,text): self._reply_text+=text; self.response.setText(self._reply_text); self.response_bubble.setText(self._reply_text)
+        position = response_position(self.pet.frameGeometry(), area, r.size())
+        r.set_tail_direction("bottom" if position.y() < self.pet.frameGeometry().top() else "top")
+        r.set_tail_x(self.pet.frameGeometry().center().x() - position.x())
+        r.move(position)
+    def _on_delta(self,text): self._reply_text+=text; self.response.setText(self._reply_text); self.response_bubble.setText(self._reply_text); self._position_response()
     def _on_finished(self,text):
-        self.response.setText(text); self.response_bubble.setText(text); self.conversation.add_assistant(text)
+        self.response.setText(text); self.response_bubble.setText(text); self._position_response(); self.conversation.add_assistant(text)
         if not text.strip(): self.response_bubble.hide()
         self._complete()
-    def _on_failed(self,kind,message): self.response.setText(message); self.response_bubble.setText(message); self._complete()
+    def _on_failed(self,kind,message): self.response.setText(message); self.response_bubble.setText(message); self._position_response(); self._complete()
     def _complete(self):
         self._pending=False; self.send_button.setEnabled(True); self.send_finished.emit(); self.pet.play('idle')
         if not self.response_pinned: QTimer.singleShot(12000,self._auto_hide_response)

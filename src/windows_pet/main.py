@@ -86,7 +86,7 @@ class PetWindow(QWidget):
         if self.input_bubble.isVisible():
             self.reposition_input_bubble()
         if self.input_bubble.response_bubble.isVisible():
-            screen = self.screen() or QApplication.primaryScreen(); r = self.input_bubble.response_bubble; area = screen.availableGeometry(); position = response_position(self.frameGeometry(), area, r.size()); r.set_tail_direction("bottom" if position.y() < self.frameGeometry().top() else "top"); r.set_tail_x(self.frameGeometry().center().x() - position.x()); r.move(position)
+            self.input_bubble._position_response()
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
             self._activity(); self._press_position = event.globalPosition().toPoint(); self._drag_offset = self._press_position - self.pos(); self._dragged = False
