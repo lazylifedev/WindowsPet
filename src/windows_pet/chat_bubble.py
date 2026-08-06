@@ -112,11 +112,13 @@ class ResponseBubble(BubbleFrame):
     def setText(self, text):
         self._text = text
         self.label.setPlainText(text)
-        self.label.setFixedWidth(420)
-        self.label.document().setTextWidth(392)
-        content_height = int(self.label.document().size().height()) + 20
+        document = self.label.document()
+        document.setTextWidth(392)
+        natural_width = max(62, min(392, int(document.idealWidth())))
+        document.setTextWidth(natural_width)
+        content_height = int(document.size().height()) + 20
         panel_height = max(44, min(320, content_height))
-        self.resize(420, panel_height + TAIL_HEIGHT)
+        self.resize(natural_width + 28, panel_height + TAIL_HEIGHT)
         self.label.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded if content_height > 320 else Qt.ScrollBarAlwaysOff)
         self._layout_label()
     def set_tail_direction(self, direction):
@@ -128,16 +130,19 @@ class ResponseBubble(BubbleFrame):
     def set_copy_enabled(self, enabled): self._copy_enabled = bool(enabled)
     def set_actions_enabled(self, enabled): self._actions_enabled = bool(enabled)
     def _show_context_menu(self, position):
+        self._build_context_menu().exec(self.label.mapToGlobal(position))
+    def _build_context_menu(self):
         menu = QMenu(self)
         copy_action = menu.addAction('回答をコピー')
         copy_action.setEnabled(self._actions_enabled and self._copy_enabled)
         copy_action.triggered.connect(lambda: QApplication.clipboard().setText(self.toPlainText()))
-        menu.addSeparator()
         pin_action = menu.addAction('固定を解除' if getattr(self.parent(), 'response_pinned', False) else '回答を固定')
         pin_action.setEnabled(self._actions_enabled and not self._pending_parent())
         pin_action.triggered.connect(self._toggle_pin)
-        menu.addAction('閉じる', self._close_response).setEnabled(self._actions_enabled and not self._pending_parent())
-        menu.exec(self.label.mapToGlobal(position))
+        menu.addSeparator()
+        close_action = menu.addAction('閉じる', self._close_response)
+        close_action.setEnabled(self._actions_enabled and not self._pending_parent())
+        return menu
     def _pending_parent(self):
         parent = self.parent()
         return bool(parent is not None and getattr(parent, 'pending', False))
@@ -207,7 +212,12 @@ class InputBubble(BubbleFrame):
     def clear_messages(self):
         if self._pending:return False
         self.conversation.clear(); return True
-    def set_response_pinned(self,pinned): self.response_pinned=pinned
+    def set_response_pinned(self, pinned):
+        pinned = bool(pinned)
+        if self.response_pinned == pinned: return
+        self.response_pinned = pinned
+        if not pinned and not self._pending and self.response_bubble.isVisible():
+            self._schedule_response_auto_hide()
     def close_response(self):
         if self._pending: return False
         self.response_pinned = False
@@ -225,7 +235,7 @@ class InputBubble(BubbleFrame):
         if self._pending:return False
         text=self.input.toPlainText().strip()
         if not text:return False
-        self._reply_text=''; self._search_status_active=False; self._response_generation += 1
+        self._reply_text=''; self._search_status_active=False; self.response_pinned=False; self._response_generation += 1
         self.input.clear(); self.conversation.add_user(text); self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking'); self.response_bubble.setText('考え中…'); self._position_response(); self.response_bubble.show()
         self._thread=QThread(self); self._worker=self._worker_factory(self.conversation.messages()); self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.search_started.connect(self._on_search_started); self._worker.search_completed.connect(self._on_search_completed)
@@ -277,9 +287,11 @@ class InputBubble(BubbleFrame):
     def _on_failed(self,kind,message): self.response.setText(message); self.response_bubble.setText(message); self.response_bubble.set_copy_enabled(bool(message.strip())); self.response_bubble.set_actions_enabled(bool(message.strip())); self._position_response(); self._complete()
     def _complete(self):
         self._pending=False; self._search_in_progress=False; self.send_button.setEnabled(True); self.send_finished.emit(); self.pet.play('idle')
-        if not self.response_pinned:
-            generation = self._response_generation
-            QTimer.singleShot(12000, lambda: self._auto_hide_response(generation))
+        if not self.response_pinned: self._schedule_response_auto_hide()
+    def _schedule_response_auto_hide(self):
+        self._response_generation += 1
+        generation = self._response_generation
+        QTimer.singleShot(12000, lambda: self._auto_hide_response(generation))
     def _auto_hide_response(self, generation=None):
         if generation is not None and generation != self._response_generation: return
         if not self._pending and not self.response_pinned:self.response_bubble.hide()

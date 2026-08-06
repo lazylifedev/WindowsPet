@@ -273,6 +273,46 @@ def test_response_actions_are_disabled_while_processing(qapp):
     assert chat.close_response() is False
     close_chat(chat, qapp)
 
+
+def test_response_short_text_is_compact_and_menu_order_is_stable(qapp):
+    chat = make_chat(qapp)
+    chat.response_bubble.setText('考え中…')
+    assert 90 <= chat.response_bubble.width() < 420
+    assert chat.response_bubble.label.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+    chat._on_finished('短い回答')
+    chat.response_bubble.show()
+    menu = chat.response_bubble._build_context_menu()
+    assert [a.text() for a in menu.actions() if not a.isSeparator()] == ['回答をコピー', '回答を固定', '閉じる']
+    assert menu.actions()[2].isSeparator()
+    close_chat(chat, qapp)
+
+
+def test_new_send_clears_pin_but_rejected_send_does_not(qapp):
+    chat = make_chat(qapp)
+    chat.response_pinned = True
+    chat.input.clear()
+    assert chat.send_message() is False and chat.response_pinned is True
+    chat.input.setPlainText('new question')
+    assert chat.send_message() is True and chat.response_pinned is False
+    assert chat.send_message() is False and chat.response_pinned is False
+    close_chat(chat, qapp)
+
+
+def test_unpin_schedules_hide_and_repin_invalidates_old_timer(monkeypatch, qapp):
+    timers = []
+    monkeypatch.setattr('windows_pet.chat_bubble.QTimer.singleShot', lambda ms, fn: timers.append(fn))
+    chat = make_chat(qapp)
+    chat._on_finished('回答')
+    chat.response_bubble.show()
+    chat.set_response_pinned(True)
+    chat.set_response_pinned(False)
+    assert chat.response_bubble.isVisible() and timers
+    old_timer = timers.pop()
+    chat.set_response_pinned(True)
+    old_timer()
+    assert chat.response_bubble.isVisible()
+    close_chat(chat, qapp)
+
 def test_input_position_is_centered_below_and_tail_is_clamped(qapp):
     chat = make_chat(qapp)
     pet = type("Pet", (), {"frameGeometry": lambda self: QRect(0, 300, 100, 100),
