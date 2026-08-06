@@ -51,6 +51,10 @@ class _ApprovedCapability:
         self.fingerprint = proposal.fingerprint
 
 
+def _new_approved_capability(session_id: str, proposal: ActionProposal) -> object:
+    return _ApprovedCapability(session_id, proposal)
+
+
 @dataclass(frozen=True)
 class GrantConsumeResult:
     success: bool
@@ -118,11 +122,7 @@ class ExecutionGrantIssuer:
     def __init__(self, store: ExecutionGrantStore):
         self._store = store
 
-    def issue(self, capability: object, proposal: ActionProposal) -> ExecutionGrant:
+    def _issue(self, capability: object, proposal: ActionProposal) -> ExecutionGrant:
         if not isinstance(capability, _ApprovedCapability):
             raise PermissionError("grant_capability_required")
         return self._store._issue_capability(proposal, capability)
-
-    @staticmethod
-    def capability(session_id: str, proposal: ActionProposal) -> object:
-        return _ApprovedCapability(session_id, proposal)

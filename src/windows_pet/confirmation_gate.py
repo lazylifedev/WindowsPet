@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from .action_models import ActionProposal, ConfirmationDecision, PolicyDecision, ToolContract
 from enum import Enum
 from .audit_log import AuditEvent, AuditSink
-from .execution_grant import ExecutionGrant, ExecutionGrantIssuer, ExecutionGrantStore
+from .execution_grant import ExecutionGrant, ExecutionGrantIssuer, ExecutionGrantStore, _new_approved_capability
 from .policy_gate import PolicyGate
 
 
@@ -33,7 +33,8 @@ class ConfirmationGate:
     def __init__(self, policy=None, grants=None, audit=None):
         self.policy = policy or PolicyGate()
         self.grants = grants or ExecutionGrantStore()
-        self.issuer = ExecutionGrantIssuer(self.grants)
+        issuer = ExecutionGrantIssuer(self.grants)
+        self._issue_grant = lambda proposal, session_id: issuer._issue(_new_approved_capability(session_id, proposal), proposal)
         self.audit = audit
         self._sessions = {}
         self._lock = threading.Lock()
@@ -66,13 +67,15 @@ class ConfirmationGate:
                         self._sessions[session_id] = (current[0], state)
             self._audit(event_name, proposal, decision.value)
             return None
-        result = self.policy.evaluate(contract, proposal)
-        if result.decision is not PolicyDecision.REQUIRE_CONFIRMATION:
-            self._audit("policy_denied", proposal, result.reason)
-            return None
-        capability = self.issuer.capability(session_id or "", proposal)
-        grant = self.issuer.issue(capability, proposal)
         with self._lock:
+            session_state = self._sessions.get(session_id or "")
+            if session_state is None or session_state[1] is not SessionState.PENDING:
+                return None
+            result = self.policy.evaluate(contract, proposal)
+            if result.decision is not PolicyDecision.REQUIRE_CONFIRMATION:
+                self._audit("policy_denied", proposal, result.reason)
+                return None
+            grant = self._issue_grant(proposal, session_id or "")
             self._sessions[session_id] = (session_state[0], SessionState.APPROVED)
         self._audit("confirmation_approved", proposal, "ok", grant)
         self._audit("grant_issued", proposal, "ok", grant)
