@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
+from PySide6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QImage
 from PySide6.QtWidgets import QApplication, QFrame, QMessageBox, QPushButton, QSizePolicy
 
 from windows_pet.character_editor_model import EditableCharacter
@@ -12,8 +12,8 @@ from windows_pet.character_package_loader import load_builtin_default_character,
 from windows_pet.character_working_package import create_working_from_builtin, save_working_package, validate_png
 
 
-def _png(path: Path):
-    image = QImage(3, 3, QImage.Format_ARGB32); image.fill(QColor("#44aaee")); assert image.save(str(path), "PNG")
+def _png(path: Path, color="#44aaee"):
+    image = QImage(3, 3, QImage.Format_ARGB32); image.fill(QColor(color)); assert image.save(str(path), "PNG")
 
 
 def test_builtin_is_copied_to_schema_v1_working_package(tmp_path, qapp):
@@ -170,15 +170,16 @@ def test_reorder_helpers_preserve_identity_and_ignore_same_slot(tmp_path, qapp):
     editor.close()
 
 
-def test_external_batch_is_naturally_sorted_and_all_or_nothing(tmp_path, qapp, monkeypatch):
+def test_external_batch_preserves_input_order_and_is_all_or_nothing(tmp_path, qapp, monkeypatch):
     editor = CharacterEditorWindow(load_builtin_default_character(Path("assets/animations")), tmp_path / "working")
     sources = []
-    for name in ("frame_10.png", "frame_2.png", "frame_1.png"):
-        path = tmp_path / name; _png(path); sources.append(path)
+    for name, color in (("frame_10.png", "#dd0000"), ("frame_2.png", "#00cc00"), ("frame_1.png", "#0000bb")):
+        path = tmp_path / name; _png(path, color); sources.append(path)
     animation = editor.model.animations[0]
     before = list(animation.frames)
     assert editor.add_external_frames(animation, sources, 1)
     assert [frame.source_path.name for frame in animation.frames[1:4]] != [path.name for path in sources]
+    assert [frame.preview_pixmap.toImage().pixelColor(0, 0).name() for frame in animation.frames[1:4]] == ["#dd0000", "#00cc00", "#0000bb"]
     assert len(animation.frames) == len(before) + 3 and editor.dirty
     editor._set_dirty(False)
     invalid = tmp_path / "not-image.png"; invalid.write_bytes(b"nope")
@@ -193,7 +194,6 @@ def test_drag_payload_is_session_and_event_bound(tmp_path, qapp):
     editor = CharacterEditorWindow(load_builtin_default_character(Path("assets/animations")), tmp_path / "working")
     strip = editor._frame_scroll_areas[0]
     frame = editor.model.animations[0].frames[0]
-    from PySide6.QtCore import QMimeData
     import json
     mime = QMimeData()
     mime.setData(FRAME_MIME, json.dumps({"session": editor.session_token, "eventId": "idle", "frameId": frame.frame_id}).encode())
@@ -202,4 +202,30 @@ def test_drag_payload_is_session_and_event_bound(tmp_path, qapp):
     assert strip._valid_internal(mime) is None
     assert validate_batch_capacity(8, 2) and not validate_batch_capacity(8, 3)
     assert sorted([Path("frame_10.png"), Path("frame_2.png"), Path("frame_1.png")], key=natural_filename_key) == [Path("frame_1.png"), Path("frame_2.png"), Path("frame_10.png")]
+    editor.close()
+
+
+def test_mixed_internal_and_external_drag_is_rejected_without_state_change(tmp_path, qapp):
+    import json
+    editor = CharacterEditorWindow(load_builtin_default_character(Path("assets/animations")), tmp_path / "working")
+    editor.show(); QApplication.processEvents()
+    animation, strip = editor.model.animations[0], editor._frame_scroll_areas[0]
+    source = tmp_path / "external.png"; _png(source)
+    mime = QMimeData()
+    mime.setData(FRAME_MIME, json.dumps({"session": editor.session_token, "eventId": animation.event_id, "frameId": animation.frames[0].frame_id}).encode())
+    mime.setUrls([QUrl.fromLocalFile(str(source))])
+    before_frames, before_dirty = list(animation.frames), editor.dirty
+    strip._show_indicator(0); strip.auto_scroll.start()
+    enter = QDragEnterEvent(QPoint(10, 10), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier)
+    strip.dragEnterEvent(enter)
+    assert not enter.isAccepted() and not strip.indicator.isVisible() and not strip.auto_scroll.isActive()
+    strip._show_indicator(0); strip.auto_scroll.start()
+    move = QDragMoveEvent(QPoint(10, 10), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier)
+    strip.dragMoveEvent(move)
+    assert not move.isAccepted() and not strip.indicator.isVisible() and not strip.auto_scroll.isActive()
+    strip._show_indicator(0); strip.auto_scroll.start()
+    drop = QDropEvent(QPointF(10, 10), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier)
+    strip.dropEvent(drop)
+    assert not drop.isAccepted() and animation.frames == before_frames and len(animation.frames) == len(before_frames)
+    assert editor.dirty == before_dirty and not strip.indicator.isVisible() and not strip.auto_scroll.isActive()
     editor.close()

@@ -26,6 +26,11 @@ def natural_filename_key(path: Path):
     return [int(part) if part.isdigit() else part.casefold() for part in re.split(r"(\d+)", path.name)]
 
 
+def has_mixed_frame_payload(mime) -> bool:
+    """Reject ambiguous drags instead of choosing between internal and external data."""
+    return mime.hasFormat(FRAME_MIME) and mime.hasUrls()
+
+
 def validate_batch_capacity(existing: int, additions: int) -> bool:
     return existing + additions <= MAX_FRAMES
 
@@ -154,13 +159,17 @@ class AnimationFrameStrip(QScrollArea):
         bar = self.horizontalScrollBar(); bar.setValue(max(bar.minimum(), min(bar.maximum(), bar.value() + self._scroll_direction * 20)))
 
     def dragEnterEvent(self, event):
-        if self.editor.recovery_mode: event.ignore(); return
-        internal, paths = self._valid_internal(event.mimeData()), self._external_paths(event.mimeData())
+        mime = event.mimeData()
+        if self.editor.recovery_mode or has_mixed_frame_payload(mime):
+            self._hide_indicator(); event.ignore(); return
+        internal, paths = self._valid_internal(mime), self._external_paths(mime)
         if internal or paths: event.acceptProposedAction()
-        else: event.ignore()
+        else: self._hide_indicator(); event.ignore()
 
     def dragMoveEvent(self, event):
-        internal, paths = self._valid_internal(event.mimeData()), self._external_paths(event.mimeData())
+        mime = event.mimeData()
+        if has_mixed_frame_payload(mime): self._hide_indicator(); event.ignore(); return
+        internal, paths = self._valid_internal(mime), self._external_paths(mime)
         if not (internal or paths): self._hide_indicator(); event.ignore(); return
         if paths and not validate_batch_capacity(len(self.animation.frames), len(paths)):
             self._hide_indicator(); event.ignore(); return
@@ -170,8 +179,9 @@ class AnimationFrameStrip(QScrollArea):
 
     def dropEvent(self, event):
         self._hide_indicator()
-        if self.editor.recovery_mode: event.ignore(); return
-        index = self._insert_index(event.position().toPoint()); internal = self._valid_internal(event.mimeData())
+        mime = event.mimeData()
+        if self.editor.recovery_mode or has_mixed_frame_payload(mime): event.ignore(); return
+        index = self._insert_index(event.position().toPoint()); internal = self._valid_internal(mime)
         if internal:
             changed = move_frame(self.animation.frames, self.animation.frames.index(internal), index)
             if changed: self.editor._set_dirty(True); self.editor._render()
@@ -229,7 +239,7 @@ class CharacterEditorWindow(QDialog):
     def _select_pngs(self):
         names, _ = QFileDialog.getOpenFileNames(self, "PNG画像を選択", "", "PNG画像 (*.png)"); return [Path(name) for name in names]
     def _stage_batch(self, sources):
-        ordered = sorted(sources, key=natural_filename_key); batch = self.session / f"batch-{uuid4().hex}"; staged = []
+        ordered = list(sources); batch = self.session / f"batch-{uuid4().hex}"; staged = []
         try:
             for source in ordered: validate_png(source)
             batch.mkdir()
