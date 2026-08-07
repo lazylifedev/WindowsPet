@@ -35,7 +35,7 @@ def build_read_plan(request: WindowsInspectionRequest) -> PowerShellReadPlan:
 '''
         timeout = 10.0
     elif request.area is WindowsInspectionArea.SERVICES:
-        rows = '''$items = @(Get-CimInstance Win32_Service | Where-Object { $null -eq $params.query -or $_.Name.IndexOf([string]$params.query, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or $_.DisplayName.IndexOf([string]$params.query, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 } | Sort-Object Name | Select-Object -First $params.maxResults | ForEach-Object { [ordered]@{name=$_.Name;displayName=$_.DisplayName;state=$_.State;startMode=$_.StartMode} })
+        rows = '''$items = @(Get-Service | Where-Object { $null -eq $params.query -or $_.Name.IndexOf([string]$params.query, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or $_.DisplayName.IndexOf([string]$params.query, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 } | Sort-Object Name | Select-Object -First $params.maxResults | ForEach-Object { [ordered]@{name=$_.Name;displayName=$_.DisplayName;state=$_.Status.ToString();startMode=$_.StartType.ToString()} })
 '''
         timeout = 15.0
     else:

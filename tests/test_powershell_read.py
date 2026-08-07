@@ -55,6 +55,14 @@ def test_builder_is_fixed_hashable_and_contains_no_mutating_constructs():
     assert not any(token in plan.script for token in forbidden)
 
 
+def test_service_inspection_uses_get_service_and_canonical_service_fields():
+    plan = build_read_plan(request("services", "Spooler", 10))
+    assert "Get-Service" in plan.script
+    assert "Get-CimInstance" not in plan.script
+    assert "state=$_.Status.ToString()" in plan.script
+    assert "startMode=$_.StartType.ToString()" in plan.script
+
+
 class FakeProcess:
     def __init__(self, stdout, stderr=b"", code=0): self.stdout, self.stderr, self.returncode, self.terminated = stdout, stderr, code, False
     def communicate(self, stdin=None, timeout=None): self.stdin, self.timeout = stdin, timeout; return self.stdout, self.stderr
