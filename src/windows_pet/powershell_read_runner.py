@@ -11,7 +11,7 @@ from pathlib import Path
 from .audit_log import AuditEvent, NullAuditSink
 from .powershell_read_builder import build_read_plan
 from .powershell_read_models import PowerShellReadOutcome, PowerShellReadStatus, WindowsInspectionRequest
-from .powershell_read_result import validate_result
+from .powershell_read_result import ResultValidationError, validate_result
 
 
 class PowerShellReadRunner:
@@ -106,7 +106,7 @@ class PowerShellReadRunner:
             return PowerShellReadOutcome(PowerShellReadStatus.NOT_AVAILABLE, result_code="not_available")
         env = os.environ.copy()
         env["WINDOWSPET_PS_PARAMETERS"] = json.dumps({"query": request.query, "maxResults": request.max_results}, ensure_ascii=False, separators=(",", ":"))
-        argv = [str(executable), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"]
+        argv = [str(executable), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", plan.script]
         emit("powershell_read_started", script_sha256=plan.script_sha256, timeout_seconds=plan.timeout_seconds)
         try:
             process = self.process_factory(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False,
@@ -117,7 +117,7 @@ class PowerShellReadRunner:
                     return PowerShellReadOutcome(PowerShellReadStatus.FAILED, result_code="child_cleanup_failed")
                 emit(event, result_code=result_code)
                 return PowerShellReadOutcome(status, result_code=result_code)
-            started, payload = self.clock(), plan.script.encode("utf-8")
+            started, payload = self.clock(), None
             while True:
                 if cancel is not None and cancel.is_set():
                     return stopped("powershell_read_cancelled", PowerShellReadStatus.CANCELLED, "cancelled")
@@ -141,11 +141,26 @@ class PowerShellReadRunner:
             emit("powershell_read_failed", result_code="execution_failed", script_sha256=plan.script_sha256,
                  timeout_seconds=plan.timeout_seconds, exit_code=process.returncode, verification_result="not_run")
             return PowerShellReadOutcome(PowerShellReadStatus.FAILED, result_code="execution_failed")
+        verification_result = ""
         try:
-            result = validate_result(json.loads(stdout.decode("utf-8")), request.area, request.max_results)
-        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            try:
+                decoded = stdout.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                verification_result = "invalid_utf8"
+                raise
+            try:
+                parsed = json.loads(decoded)
+            except json.JSONDecodeError:
+                verification_result = "invalid_json"
+                raise
+            result = validate_result(parsed, request.area, request.max_results)
+        except ResultValidationError as exc:
+            verification_result = exc.code
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            pass
+        if verification_result:
             emit("powershell_read_invalid_output", result_code="invalid_output", script_sha256=plan.script_sha256,
-                 timeout_seconds=plan.timeout_seconds, exit_code=process.returncode, verification_result="failed")
+                 timeout_seconds=plan.timeout_seconds, exit_code=process.returncode, verification_result=verification_result)
             return PowerShellReadOutcome(PowerShellReadStatus.INVALID_OUTPUT, result_code="invalid_output")
         emit("powershell_read_succeeded", script_sha256=plan.script_sha256, timeout_seconds=plan.timeout_seconds,
              exit_code=process.returncode, verification_result="passed", item_count=len(result["items"]))

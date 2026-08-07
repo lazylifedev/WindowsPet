@@ -21,7 +21,12 @@ _FOOTER = '''} catch {
 
 def _wrap(operation: str, rows: str) -> str:
     return _HEADER + rows + f'''$result = [ordered]@{{schemaVersion=1;operation="{operation}";items=@($items)}}
-$result | ConvertTo-Json -Compress -Depth 6
+$json = $result | ConvertTo-Json -Compress -Depth 6
+$encoding = [System.Text.UTF8Encoding]::new($false)
+$writer = [System.IO.StreamWriter]::new([Console]::OpenStandardOutput(), $encoding)
+$writer.AutoFlush = $true
+$writer.Write($json)
+$writer.Dispose()
 ''' + _FOOTER
 
 def build_read_plan(request: WindowsInspectionRequest) -> PowerShellReadPlan:

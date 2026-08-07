@@ -9,10 +9,11 @@ import pytest
 
 from windows_pet.powershell_read_builder import build_read_plan
 from windows_pet.powershell_read_models import WindowsInspectionArea, WindowsInspectionRequest, PowerShellReadStatus
-from windows_pet.powershell_read_result import validate_result
+from windows_pet.powershell_read_result import ResultValidationError, validate_result
 from windows_pet.powershell_read_runner import PowerShellReadRunner
 from windows_pet.tool_dispatcher import ToolDispatcher
 from windows_pet.ai_client import AIClient
+from windows_pet.audit_log import InMemoryAuditSink
 
 
 def request(area="processes", query=None, maximum=10):
@@ -59,7 +60,7 @@ def test_runner_uses_safe_argv_environment_and_returns_valid_output(tmp_path):
     def factory(*args, **kwargs): calls.append((args, kwargs)); return FakeProcess(output)
     outcome = PowerShellReadRunner(windows_directory_resolver=lambda: root, process_factory=factory).execute(request())
     assert outcome.status is PowerShellReadStatus.SUCCESS and outcome.result["items"][0]["name"] == "notepad"
-    args, kwargs = calls[0]; assert args[0][1:] == ["-NoLogo","-NoProfile","-NonInteractive","-Command","-"] and kwargs["shell"] is False
+    args, kwargs = calls[0]; assert args[0][1:5] == ["-NoLogo","-NoProfile","-NonInteractive","-Command"] and args[0][5] == build_read_plan(request()).script and kwargs["shell"] is False
     assert json.loads(kwargs["env"]["WINDOWSPET_PS_PARAMETERS"]) == {"query":None,"maxResults":10} and kwargs["cwd"] == str(executable.parent)
 
 
@@ -85,6 +86,50 @@ def test_runner_builds_and_validates_its_own_plan_before_starting_a_process(tmp_
 
 def test_result_validator_rejects_sensitive_or_unknown_shape():
     with pytest.raises(ValueError): validate_result({"schemaVersion":1,"operation":"network","items":[{"interfaceAlias":"x","status":"Up","ipv4Addresses":[],"defaultGateway":None,"guid":"secret"}]}, WindowsInspectionArea.NETWORK, 1)
+
+
+def test_runner_accepts_utf8_with_or_without_bom_and_rejects_other_encodings(tmp_path):
+    root, _ = powershell_root(tmp_path); valid = json.dumps({"schemaVersion":1,"operation":"processes","items":[]}).encode()
+    for payload in (valid, b"\xef\xbb\xbf" + valid):
+        assert PowerShellReadRunner(windows_directory_resolver=lambda: root, process_factory=lambda *a, **k: FakeProcess(payload)).execute(request()).status is PowerShellReadStatus.SUCCESS
+    for payload in (b"\xff\xfe" + valid, "あ".encode("cp932"), b"prefix" + valid, valid + b"suffix"):
+        assert PowerShellReadRunner(windows_directory_resolver=lambda: root, process_factory=lambda *a, **k: FakeProcess(payload)).execute(request()).status is PowerShellReadStatus.INVALID_OUTPUT
+
+
+@pytest.mark.parametrize(("item", "code"), [({"name":"x","pid":"1","cpuSeconds":None,"workingSetMb":1}, "invalid_process_pid"), ({"name":"x","pid":1,"cpuSeconds":float("nan"),"workingSetMb":1}, "invalid_process_cpu"), ({"name":"x","pid":1,"cpuSeconds":float("inf"),"workingSetMb":1}, "invalid_process_cpu"), ({"name":"x","pid":1,"cpuSeconds":None,"workingSetMb":float("nan")}, "invalid_process_working_set"), ({"name":"x","pid":1,"cpuSeconds":None,"workingSetMb":float("inf")}, "invalid_process_working_set")])
+def test_process_validation_codes(item, code):
+    with pytest.raises(ResultValidationError, match=code): validate_result({"schemaVersion":1,"operation":"processes","items":[item]}, WindowsInspectionArea.PROCESSES, 1)
+
+
+def test_invalid_output_audit_contains_only_fixed_code(tmp_path):
+    root, _ = powershell_root(tmp_path); audit = InMemoryAuditSink()
+    outcome = PowerShellReadRunner(windows_directory_resolver=lambda: root, process_factory=lambda *a, **k: FakeProcess(b"not-json"), audit=audit).execute(request())
+    event = audit.events[-1]
+    assert outcome.status is PowerShellReadStatus.INVALID_OUTPUT
+    assert event.verification_result == "invalid_json" and "stdout" not in event.__dict__ and "stderr" not in event.__dict__
+
+
+def test_ai_does_not_repeat_a_failed_inspection(monkeypatch):
+    class Call:
+        type = "function_call"; name = "inspect_windows"; arguments = '{"area":"processes","query":null,"max_results":5}'
+        def __init__(self, call_id): self.call_id = call_id
+    class Response:
+        def __init__(self, call): self.output = [call]; self.output_text = ""
+    class Responses:
+        def __init__(self): self.calls = 0
+        def create(self, **kwargs): self.calls += 1; return Response(Call(f"call-{self.calls}"))
+    class Client:
+        def __init__(self): self.responses = Responses()
+    class Runner:
+        def __init__(self): self.calls = 0
+        def execute(self, *_):
+            self.calls += 1
+            from windows_pet.powershell_read_models import PowerShellReadOutcome
+            return PowerShellReadOutcome(PowerShellReadStatus.INVALID_OUTPUT, result_code="invalid_output")
+    runner = Runner(); client = Client()
+    with pytest.raises(Exception, match="inspection_retry_blocked"):
+        AIClient(client=client, api_key="test-key", inspection_runner=runner).stream_with_tools([], lambda _: None)
+    assert runner.calls == 1 and client.responses.calls == 2
 
 
 class CleanupProcess(FakeProcess):

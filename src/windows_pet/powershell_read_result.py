@@ -1,19 +1,30 @@
 from __future__ import annotations
 
 from .powershell_read_models import WindowsInspectionArea
+import math
+
+
+class ResultValidationError(ValueError):
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
 
 
 def validate_result(value: object, request_area: WindowsInspectionArea, max_results: int) -> dict:
-    if not isinstance(value, dict) or set(value) != {"schemaVersion", "operation", "items"}:
-        raise ValueError("invalid_schema")
-    if value["schemaVersion"] != 1 or value["operation"] != request_area.value or not isinstance(value["items"], list):
-        raise ValueError("invalid_schema")
+    if not isinstance(value, dict) or set(value) != {"schemaVersion", "operation", "items"}: raise ResultValidationError("invalid_top_level")
+    if type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1: raise ResultValidationError("schema_version_mismatch")
+    if not isinstance(value["operation"], str) or value["operation"] != request_area.value: raise ResultValidationError("operation_mismatch")
+    if not isinstance(value["items"], list): raise ResultValidationError("items_not_array")
     if len(value["items"]) > max_results:
-        raise ValueError("too_many_items")
+        raise ResultValidationError("too_many_items")
     for item in value["items"]:
-        if not isinstance(item, dict): raise ValueError("invalid_item")
+        if not isinstance(item, dict): raise ResultValidationError("invalid_process_keys" if request_area is WindowsInspectionArea.PROCESSES else "invalid_top_level")
         if request_area is WindowsInspectionArea.PROCESSES:
-            if set(item) != {"name", "pid", "cpuSeconds", "workingSetMb"} or not isinstance(item["name"], str) or not item["name"] or type(item["pid"]) is not int or item["pid"] < 0 or (item["cpuSeconds"] is not None and not isinstance(item["cpuSeconds"], (int, float))) or not isinstance(item["workingSetMb"], (int, float)) or item["workingSetMb"] < 0: raise ValueError("invalid_process")
+            if set(item) != {"name", "pid", "cpuSeconds", "workingSetMb"}: raise ResultValidationError("invalid_process_keys")
+            if not isinstance(item["name"], str) or not item["name"]: raise ResultValidationError("invalid_process_name")
+            if type(item["pid"]) is not int or item["pid"] < 0: raise ResultValidationError("invalid_process_pid")
+            if item["cpuSeconds"] is not None and (type(item["cpuSeconds"]) not in (int, float) or not math.isfinite(item["cpuSeconds"])): raise ResultValidationError("invalid_process_cpu")
+            if type(item["workingSetMb"]) not in (int, float) or not math.isfinite(item["workingSetMb"]) or item["workingSetMb"] < 0: raise ResultValidationError("invalid_process_working_set")
         elif request_area is WindowsInspectionArea.SERVICES:
             if set(item) != {"name", "displayName", "state", "startMode"} or not all(isinstance(item[k], str) and item[k] for k in item): raise ValueError("invalid_service")
         else:

@@ -87,7 +87,7 @@ class AIClient:
 
     def stream_with_tools(self, history, on_delta, on_search_started=None, on_search_completed=None, cancel=None, on_application_launch_requested=None, on_powershell_started=None, on_powershell_completed=None) -> str:
         """Run the public Responses API tool loop; full paths never enter API input."""
-        seen=set(); inputs=list(history); dispatcher=ToolDispatcher(); calls=0
+        seen=set(); failed_inspections=set(); inputs=list(history); dispatcher=ToolDispatcher(); calls=0
         try:
             while calls < 3:
                 self._raise_if_cancelled(cancel)
@@ -112,11 +112,14 @@ class AIClient:
                     if not call_id or call_id in seen or len(calls_found) != 1: raise AIClientError("tool", "unsupported_tool")
                     try: request = dispatcher.parse_windows_inspection(getattr(call, "arguments", ""))
                     except ValueError as exc: raise AIClientError("tool", "invalid_inspection_request") from exc
+                    signature = (request.area.value, request.query, request.max_results)
+                    if signature in failed_inspections: raise AIClientError("tool", "inspection_retry_blocked")
                     seen.add(call_id); calls += 1
                     if on_powershell_started: on_powershell_started(request.area.value)
                     outcome = self.inspection_runner.execute(request, cancel)
                     if outcome.status.value == "cancelled": raise AIClientError("cancelled", "Windows調査をキャンセルしました。")
                     safe = dispatcher.safe_inspection_output(outcome, request.area.value)
+                    if outcome.result_code in {"invalid_output", "not_available", "execution_failed", "timeout", "output_limit_exceeded", "child_cleanup_failed"}: failed_inspections.add(signature)
                     if on_powershell_completed: on_powershell_completed(safe)
                     inputs.extend(getattr(response, "output", [])); inputs.append({"type":"function_call_output","call_id":call_id,"output":json.dumps(safe, ensure_ascii=False)})
                     continue
