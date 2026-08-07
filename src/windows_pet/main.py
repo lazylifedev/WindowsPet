@@ -310,7 +310,7 @@ class PetWindow(QWidget):
     def open_character_editor(self):
         if self.character_editor_window is None or not self.character_editor_window.isVisible():
             builtin = load_character_with_fallback(None, assets_root()).package
-            self.character_editor_window = CharacterEditorWindow(builtin, character_working_root(), self)
+            self.character_editor_window = CharacterEditorWindow(builtin, character_working_root(), None)
         self.character_editor_window.show(); self.character_editor_window.raise_(); self.character_editor_window.activateWindow()
     def show_help(self):
         if self.help_window is None: self.help_window = HelpWindow(self)
@@ -348,6 +348,7 @@ class PetWindow(QWidget):
         self._hover_timer.stop(); self._stop_frame_timer()
         self.launch_controller.shutdown()
         self.input_bubble.close()
+        if self.character_editor_window is not None: self.character_editor_window.shutdown()
         if self.openai_settings_window is not None: self.openai_settings_window.shutdown()
         if self.help_window is not None: self.help_window.close()
         if self.local_inspection_window is not None: self.local_inspection_window.shutdown()

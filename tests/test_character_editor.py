@@ -10,6 +10,7 @@ from windows_pet.character_editor_window import (FRAME_MIME, CharacterEditorWind
                                                   natural_filename_key, validate_batch_capacity)
 from windows_pet.character_package_loader import load_builtin_default_character, load_character_package
 from windows_pet.character_working_package import create_working_from_builtin, save_working_package, validate_png
+from windows_pet.main import PetWindow
 
 
 def _png(path: Path, color="#44aaee"):
@@ -175,10 +176,38 @@ def test_closing_editor_does_not_quit_application(tmp_path, qapp):
 
 def test_editor_enables_maximize_button_and_keeps_minimum_size(tmp_path, qapp):
     editor = CharacterEditorWindow(load_builtin_default_character(Path("assets/animations")), tmp_path / "working")
+    assert editor.isWindow()
+    assert not editor.windowFlags() & Qt.WindowStaysOnTopHint
     assert editor.windowFlags() & Qt.WindowMaximizeButtonHint
     assert editor.minimumWidth() == 700
     assert editor.minimumHeight() == 500
     editor.close()
+
+
+def test_pet_editor_is_independent_and_shutdown_cleans_its_session(tmp_path, qapp, monkeypatch):
+    working = tmp_path / "characters" / "working"
+    monkeypatch.setattr("windows_pet.main.character_working_root", lambda: working)
+    package = load_builtin_default_character(Path("assets/animations"))
+    pet = PetWindow(package.animations, tmp_path / "position.json", quit_callback=lambda: None)
+    pet_flags_before = pet.windowFlags()
+
+    pet.open_character_editor()
+    editor = pet.character_editor_window
+    assert editor.parent() is None and editor.isWindow()
+    assert not editor.windowFlags() & Qt.WindowStaysOnTopHint
+    assert pet.windowFlags() == pet_flags_before
+    session = editor.session
+
+    editor.close()
+    QApplication.processEvents()
+    assert not session.exists()
+    pet.open_character_editor()
+    assert pet.character_editor_window is not editor
+    reopened_session = pet.character_editor_window.session
+    pet.character_editor_window._set_dirty(True)
+    monkeypatch.setattr("windows_pet.character_editor_window.QMessageBox.question", lambda *args: (_ for _ in ()).throw(AssertionError("shutdown must not prompt")))
+    pet.close()
+    assert not reopened_session.exists()
 
 
 def test_editor_frame_rows_keep_complete_cards_in_horizontal_only_scroll_areas(tmp_path, qapp):
