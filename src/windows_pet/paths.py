@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from PySide6.QtCore import QStandardPaths
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -20,3 +21,16 @@ def application_root() -> Path:
 
 def assets_root() -> Path:
     return resource_path("assets/animations")
+
+
+def character_data_root() -> Path:
+    """Return the per-user character data root; never use the install directory."""
+    location = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+    if not location:
+        raise RuntimeError("character data location unavailable")
+    return Path(location) / "characters"
+
+
+def character_working_root(data_root: Path | None = None) -> Path:
+    """Return the editor working package location (inject ``data_root`` in tests)."""
+    return (Path(data_root) if data_root is not None else character_data_root()) / "working"

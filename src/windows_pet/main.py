@@ -9,7 +9,8 @@ from PySide6.QtWidgets import QApplication, QLabel, QMenu, QMessageBox, QWidget,
 from .character_models import CharacterPackageError
 from .character_package_loader import load_character_with_fallback
 from .chat_bubble import InputBubble, chat_position, response_position
-from .paths import application_root, assets_root
+from .paths import application_root, assets_root, character_working_root
+from .character_editor_window import CharacterEditorWindow
 from .storage import constrain_to_primary, load_position, save_position
 from .file_search_settings_window import FileSearchSettingsWindow
 from .search_results_window import SearchResultsWindow
@@ -25,6 +26,8 @@ from .ai_worker import AIWorker
 def configure_application(app: QApplication) -> QApplication:
     """Keep Qt alive while the Qt.Tool pet is the only visible window."""
     app.setQuitOnLastWindowClosed(False)
+    app.setApplicationName("WindowsPet")
+    app.setOrganizationName("Lazy Life Dev.")
     return app
 
 
@@ -51,7 +54,7 @@ class PetWindow(QWidget):
         self.openai_settings_window = None
         self.help_window = None
         self.local_inspection_window = None
-        self.tray_icon = None; self.tray_menu = None
+        self.tray_icon = None; self.tray_menu = None; self.character_editor_window = None
         self._exit_requested = False
         self._shutdown_complete = False
         self._quit_callback = quit_callback or QApplication.quit
@@ -151,6 +154,7 @@ class PetWindow(QWidget):
         icon = QIcon(pixmap); self.setWindowIcon(icon)
         self.tray_menu = QMenu(self)
         self.tray_menu.addAction("WindowsPetを表示", self.show_pet)
+        self.tray_menu.addAction("キャラクター設定", self.open_character_editor)
         self.tray_menu.addAction("チャットを開く", self.show_pet_and_open_chat)
         self.tray_menu.addSeparator()
         self.tray_menu.addAction("OpenAI API 設定", self.open_openai_settings)
@@ -232,6 +236,7 @@ class PetWindow(QWidget):
 
     def _build_context_menu(self):
         menu = QMenu(self)
+        menu.addAction("キャラクター設定", self.open_character_editor)
         menu.addAction('OpenAI API 設定', self.open_openai_settings)
         menu.addAction('ファイル検索設定', self.open_file_search_settings)
         menu.addAction('PC調査情報', self.show_local_inspection)
@@ -256,6 +261,11 @@ class PetWindow(QWidget):
         if self.openai_settings_window is None:
             self.openai_settings_window = OpenAISettingsWindow(self)
         self.openai_settings_window.show(); self.openai_settings_window.raise_(); self.openai_settings_window.activateWindow()
+    def open_character_editor(self):
+        if self.character_editor_window is None or not self.character_editor_window.isVisible():
+            builtin = load_character_with_fallback(None, assets_root()).package
+            self.character_editor_window = CharacterEditorWindow(builtin, character_working_root(), self)
+        self.character_editor_window.show(); self.character_editor_window.raise_(); self.character_editor_window.activateWindow()
     def show_help(self):
         if self.help_window is None: self.help_window = HelpWindow(self)
         self.help_window.show(); self.help_window.raise_(); self.help_window.activateWindow()
