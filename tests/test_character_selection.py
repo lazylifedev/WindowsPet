@@ -2,10 +2,13 @@ import json
 import zipfile
 from pathlib import Path
 
+from PySide6.QtWidgets import QPushButton
+
 from windows_pet.character_package_loader import load_character_package
 from windows_pet.character_selection import CharacterSelection, export_wpet, import_wpet, read_selection, resolve_selection, save_selection
 from windows_pet.main import PetWindow
 from windows_pet.character_package_loader import load_builtin_default_character
+from windows_pet.character_manager_window import CharacterManagerWindow
 from test_character_packages import _package
 
 
@@ -71,3 +74,19 @@ def test_same_id_import_requires_explicit_replace(tmp_path, qapp):
     except FileExistsError: pass
     else: assert False, "same-ID archive replaced an installed package without confirmation"
     assert import_wpet(archive, installed_root, replace_existing=True).package_id == "sample_pet"
+
+
+def test_character_manager_labels_and_active_source_identity(tmp_path, qapp):
+    builtin = load_builtin_default_character(Path("assets/animations"))
+    pet = PetWindow(builtin.animations, tmp_path / "position.json", character_package=builtin,
+                    character_selection=CharacterSelection("working", builtin.package_id, builtin.version))
+    manager = CharacterManagerWindow(pet, tmp_path / "characters", Path("assets/animations"))
+    def use_label(source):
+        card = manager._card(source, builtin)
+        return card.findChildren(QPushButton)[0].text()
+    assert manager.windowTitle() == "キャラクター管理"
+    assert use_label("working") == "再適用"
+    assert use_label("installed") == "使用する"
+    pet.current_character_selection = CharacterSelection("installed", builtin.package_id, builtin.version)
+    assert use_label("installed") == "再適用"
+    manager.close(); pet.close()

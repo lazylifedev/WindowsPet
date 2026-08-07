@@ -14,7 +14,7 @@ class CharacterManagerWindow(QWidget):
         super().__init__(None)
         self.pet, self.data_root, self.builtin_root = pet, Path(data_root), Path(builtin_root)
         self.working_root, self.installed_root = self.data_root / "working", self.data_root / "installed"
-        self.setWindowTitle("キャラクター選択"); self.resize(480, 560)
+        self.setWindowTitle("キャラクター管理"); self.resize(480, 560)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
         layout = QVBoxLayout(self); self.status = QLabel(); layout.addWidget(self.status)
         self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.content = QWidget(); self.cards = QVBoxLayout(self.content); self.cards.addStretch(); self.scroll.setWidget(self.content); layout.addWidget(self.scroll)
@@ -38,7 +38,9 @@ class CharacterManagerWindow(QWidget):
         thumb.setPixmap(pixmap.scaled(96, 128, Qt.KeepAspectRatio, Qt.SmoothTransformation)); row.addWidget(thumb)
         source_label = {"builtin": "内蔵", "working": "編集中", "installed": "インストール済み"}[source]
         metadata = QLabel(f"{package.name}\n状態: {source_label}\nID: {package.package_id}\nバージョン: {package.version}\n作者: {package.author or '-'}\nライセンス: {package.license_name or '-'}")
-        row.addWidget(metadata, 1); actions = QVBoxLayout(); use = QPushButton("使用する")
+        selection = getattr(self.pet, "current_character_selection", None)
+        is_current = selection is not None and (selection.source, selection.package_id) == (source, package.package_id)
+        row.addWidget(metadata, 1); actions = QVBoxLayout(); use = QPushButton("再適用" if is_current else "使用する")
         use.clicked.connect(lambda: self._use(source, package)); actions.addWidget(use)
         if source != "builtin":
             export = QPushButton("エクスポート"); export.clicked.connect(lambda: self._export(package)); actions.addWidget(export)

@@ -5,7 +5,7 @@ from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QThread, Slot, qInstallMes
 from PySide6.QtGui import QEnterEvent, QFocusEvent, QKeyEvent, QPaintEvent
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtCore import QPointF, QObject, Signal
-from PySide6.QtWidgets import QApplication, QWidget, QFrame, QLabel
+from PySide6.QtWidgets import QApplication, QWidget, QFrame, QLabel, QSystemTrayIcon
 
 from windows_pet.ai_client import AIClient, AIClientError, _error
 from windows_pet.chat_bubble import (ChatBubble, HistoryWindow, MessageEdit, ResponseBubble,
@@ -219,13 +219,22 @@ def test_context_menu_and_history_use_japanese_labels(qapp, tmp_path):
     menu = pet._build_context_menu()
     labels = [action.text() for action in menu.actions() if not action.isSeparator()]
     assert labels == [
-        "キャラクター選択",
+        "キャラクター管理",
         "キャラクター設定", "OpenAI API 設定", "ファイル検索設定", "PC調査情報", "最近の検索結果", "処理をキャンセル",
         "チャットを開く", "チャットを閉じる", "会話履歴", "使い方", "位置をリセット", "終了",
     ]
     history = HistoryWindow(pet.input_bubble.conversation)
     assert history.windowTitle() == "会話履歴"
     history.close(); pet.close()
+
+
+def test_system_tray_uses_character_manager_label(qapp, tmp_path, monkeypatch):
+    animations = load_animations(Path("assets/animations"))
+    pet = PetWindow(animations, tmp_path / "position.json")
+    monkeypatch.setattr(QSystemTrayIcon, "isSystemTrayAvailable", staticmethod(lambda: True))
+    assert pet.setup_system_tray()
+    assert "キャラクター管理" in [action.text() for action in pet.tray_menu.actions()]
+    pet.tray_icon.hide(); pet.close()
 
 
 def test_response_auto_hide_and_pinned(monkeypatch, qapp):
