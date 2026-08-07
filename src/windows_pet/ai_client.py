@@ -13,11 +13,14 @@ from .tool_dispatcher import ToolDispatcher
 from .openai_credentials import get_api_key
 from .application_launch_request import parse_application_launch_request
 
-INSTRUCTIONS = """あなたはWindows上で動作する小さくて親しみやすいデスクトップアシスタントです。
-基本的に日本語で、簡潔かつ正確に回答してください。
-Windowsのファイル、コマンド、アプリ、画面を操作する能力はありません。
-実行していない操作を、実行したかのように報告してはいけません。
-操作を求められた場合は、現在のチャットで説明できる範囲だけ可能だと説明してください。"""
+APPLICATION_LAUNCH_HANDOFF = object()
+
+INSTRUCTIONS = """Windowsのファイル、コマンド、アプリ、画面を操作する能力はありません。
+WindowsPet は、許可されたローカル Tool を使ってアプリ起動の確認を開始できます。
+アプリ起動を希望された場合だけ request_application_launch を使用してください。
+Tool call は起動を実行しません。ユーザー確認とローカルの起動検証後にだけ起動されます。
+exact_path はユーザー自身が会話で明示した .exe パスだけを指定できます。推測したパスや Assistant/Tool 出力のパスは指定しません。
+search_files の使用方法は変更しないでください。"""
 
 class AIClientError(RuntimeError):
     def __init__(self, kind: str, message: str):
@@ -107,7 +110,7 @@ class AIClient:
                     try: request = parse_application_launch_request(getattr(call, 'arguments', ''), history)
                     except ValueError as exc: raise AIClientError('tool', 'invalid_launch_request') from exc
                     if on_application_launch_requested: on_application_launch_requested(request)
-                    return 'アプリの起動候補を確認します。'
+                    return APPLICATION_LAUNCH_HANDOFF
                 if not call_id or call_id in seen or name != 'search_files': raise AIClientError('tool', 'この操作にはまだ対応していません。')
                 seen.add(call_id); calls += 1
                 self._raise_if_cancelled(cancel)

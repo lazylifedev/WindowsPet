@@ -9,7 +9,7 @@ from .confirmation_gate import ConfirmationSession
 
 class ActionConfirmationDialog(QDialog):
     """Displays a proposal and returns a response; it never issues a grant."""
-    def __init__(self, proposal: ActionProposal, session: ConfirmationSession, now=None, parent=None):
+    def __init__(self, proposal: ActionProposal, session: ConfirmationSession, *, now=None, parent=None):
         super().__init__(parent); self.proposal = proposal; self.session = session
         self.now = now or (lambda: datetime.now(timezone.utc)); self._decided = False
         self.response = ConfirmationResponse(ConfirmationDecision.CLOSED, session.session_id, proposal.proposal_id, proposal.fingerprint)

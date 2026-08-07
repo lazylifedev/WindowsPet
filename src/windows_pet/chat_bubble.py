@@ -365,6 +365,8 @@ class InputBubble(BubbleFrame):
         self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.search_started.connect(self._on_search_started); self._worker.search_completed.connect(self._on_search_completed)
         if hasattr(self._worker, "application_launch_requested"):
             self._worker.application_launch_requested.connect(self.application_launch_requested.emit)
+        if hasattr(self._worker, "application_launch_handed_off"):
+            self._worker.application_launch_handed_off.connect(self._thread.quit)
         self._worker.finished.connect(self._on_finished); self._worker.failed.connect(self._on_failed); self._worker.finished.connect(self._thread.quit); self._worker.failed.connect(self._thread.quit); self._thread.finished.connect(self._thread_done); self._thread.start(); return True
     def _position_response(self):
         if not hasattr(self.pet, 'frameGeometry'): return

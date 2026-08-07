@@ -240,7 +240,7 @@ class PetWindow(QWidget):
         if self.help_window is None: self.help_window = HelpWindow(self)
         self.help_window.show(); self.help_window.raise_(); self.help_window.activateWindow()
     def show_local_inspection(self):
-        if self.local_inspection_window is None: self.local_inspection_window = LocalInspectionWindow(self)
+        if self.local_inspection_window is None: self.local_inspection_window = LocalInspectionWindow(self, audit_sink=self.audit_sink)
         self.local_inspection_window.show(); self.local_inspection_window.raise_(); self.local_inspection_window.activateWindow()
     def show_recent_search(self):
         session = self.search_store.latest()
@@ -256,6 +256,14 @@ class PetWindow(QWidget):
             self.search_results_window.session = session
             self.search_results_window._populate()
         self.search_results_window.show(); self.search_results_window.raise_(); self.search_results_window.activateWindow()
+    def cancel_current_processing(self):
+        if self.input_bubble.pending:
+            return self.input_bubble.cancel_current_request()
+        if self.launch_controller.is_busy:
+            self.launch_controller.cancel()
+            return True
+        return False
+
     def closeEvent(self, event):
         self.launch_controller.shutdown()
         self.input_bubble.close()
