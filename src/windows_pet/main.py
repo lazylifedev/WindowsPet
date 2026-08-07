@@ -208,6 +208,7 @@ class PetWindow(QWidget):
         if pixmap is None: return False
         icon = QIcon(pixmap); self.setWindowIcon(icon)
         self.tray_menu = QMenu(self)
+        self.tray_menu.addAction("Character selection", self.open_character_manager)
         self.tray_menu.addAction("WindowsPetを表示", self.show_pet)
         self.tray_menu.addAction("キャラクター設定", self.open_character_editor)
         self.tray_menu.addAction("チャットを開く", self.show_pet_and_open_chat)
