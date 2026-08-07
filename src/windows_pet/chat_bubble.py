@@ -373,6 +373,10 @@ class InputBubble(BubbleFrame):
         self._refresh_history_window()
         self._thread=QThread(self); self._worker=self._worker_factory(self.conversation.messages()); self._worker.moveToThread(self._thread); self._update_primary_button()
         self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.search_started.connect(self._on_search_started); self._worker.search_completed.connect(self._on_search_completed)
+        if hasattr(self._worker, "powershell_started"):
+            self._worker.powershell_started.connect(lambda _area: self._show_response_status('Windowsの状態を調査しています…'))
+        if hasattr(self._worker, "powershell_completed"):
+            self._worker.powershell_completed.connect(lambda _result: self._show_response_status('調査結果を確認しています…'))
         if hasattr(self._worker, "application_launch_requested"):
             self._worker.application_launch_requested.connect(self._on_application_launch_requested)
         if hasattr(self._worker, "application_launch_handed_off"):

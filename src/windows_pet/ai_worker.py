@@ -13,9 +13,11 @@ class AIWorker(QObject):
     search_completed = Signal(dict)
     application_launch_requested = Signal(object)
     application_launch_handed_off = Signal()
+    powershell_started = Signal(str)
+    powershell_completed = Signal(dict)
 
-    def __init__(self, history: list[dict[str, str]]):
-        super().__init__(); self.history = history; self.cancel_token = Event()
+    def __init__(self, history: list[dict[str, str]], audit=None):
+        super().__init__(); self.history = history; self.cancel_token = Event(); self.audit = audit
 
     def cancel(self):
         self.cancel_token.set()
@@ -23,7 +25,8 @@ class AIWorker(QObject):
     @Slot()
     def run(self):
         try:
-            text = AIClient().stream_with_tools(self.history, self.delta.emit, self.search_started.emit, self.search_completed.emit, self.cancel_token, self.application_launch_requested.emit)
+            from .powershell_read_runner import PowerShellReadRunner
+            text = AIClient(inspection_runner=PowerShellReadRunner(audit=self.audit)).stream_with_tools(self.history, self.delta.emit, self.search_started.emit, self.search_completed.emit, self.cancel_token, self.application_launch_requested.emit, self.powershell_started.emit, self.powershell_completed.emit)
             if text is APPLICATION_LAUNCH_HANDOFF:
                 self.application_launch_handed_off.emit()
                 return

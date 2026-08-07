@@ -18,6 +18,7 @@ from .help_window import HelpWindow
 from .local_inspection_window import LocalInspectionWindow
 from .audit_log import JsonlAuditSink
 from .chat_application_launch_controller import ChatApplicationLaunchController
+from .ai_worker import AIWorker
 
 
 class PetWindow(QWidget):
@@ -34,8 +35,8 @@ class PetWindow(QWidget):
         self._last_activity = QTimer(self); self._last_activity.setSingleShot(True); self._last_activity.timeout.connect(lambda: self.play("sleep"))
         self._timer = QTimer(self); self._timer.timeout.connect(self._next_frame)
         self._animation = None; self._frame = 0
-        self.input_bubble = InputBubble(self)
         self.audit_sink = audit_sink or JsonlAuditSink(position_path.parent / "audit.jsonl")
+        self.input_bubble = InputBubble(self, worker_factory=lambda history: AIWorker(history, audit=self.audit_sink))
         self.launch_controller = ChatApplicationLaunchController(self.input_bubble.complete_local_action, self, self.audit_sink, show_status=self.input_bubble.show_local_action_status)
         self.search_store = SearchResultStore()
         self.search_settings_window = None

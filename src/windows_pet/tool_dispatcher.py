@@ -7,6 +7,7 @@ from threading import Event
 from .file_search_models import SearchRequest
 from .file_search_service import FileSearchService
 from .file_search_settings import SearchSettings
+from .powershell_read_models import WindowsInspectionArea, WindowsInspectionRequest
 
 class ToolDispatcher:
     """Validates model arguments locally before any filesystem access."""
@@ -25,8 +26,23 @@ class ToolDispatcher:
         return result
 
     @staticmethod
+    def parse_windows_inspection(arguments: str | dict) -> WindowsInspectionRequest:
+        data = json.loads(arguments) if isinstance(arguments, str) else arguments
+        if not isinstance(data, dict) or set(data) != {"area", "query", "max_results"}: raise ValueError("inspect_windows の引数が不正です。")
+        try: area = WindowsInspectionArea(data["area"])
+        except (TypeError, ValueError) as exc: raise ValueError("inspect_windows の引数が不正です。") from exc
+        query, maximum = data["query"], data["max_results"]
+        if (query is not None and (not isinstance(query, str) or len(query) > 100 or "\0" in query)) or type(maximum) is not int or not 1 <= maximum <= 100 or (area is WindowsInspectionArea.NETWORK and query is not None): raise ValueError("inspect_windows の引数が不正です。")
+        return WindowsInspectionRequest(area, query, maximum)
+
+    @staticmethod
     def safe_output(result: dict, search_id: str | None = None) -> dict:
         rows = []
         for row in result.get('results', [])[:20]:
             rows.append({k: row[k] for k in ('result_id','name','extension','root_alias','modified_at','size_bytes') if k in row})
         return {'status': result.get('status','success'), 'search_id': search_id, 'total_found': result.get('total_found',0), 'returned_to_model': len(rows), 'truncated': result.get('total_found',0) > len(rows), 'elapsed_ms': result.get('elapsed_ms',0), 'results': rows}
+
+    @staticmethod
+    def safe_inspection_output(outcome, operation: str) -> dict:
+        result = outcome.result or {}
+        return {"status": "ok" if outcome.status.value == "success" else outcome.status.value, "operation": operation, "count": len(result.get("items", [])), "items": result.get("items", []), "result_code": outcome.result_code}

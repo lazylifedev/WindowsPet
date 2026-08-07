@@ -29,6 +29,12 @@ class AuditEventType(str, Enum):
     VERIFICATION_SUCCEEDED = "verification_succeeded"
     VERIFICATION_FAILED = "verification_failed"
     AUDIT_WRITE_FAILED = "audit_write_failed"
+    POWERSHELL_READ_STARTED = "powershell_read_started"
+    POWERSHELL_READ_SUCCEEDED = "powershell_read_succeeded"
+    POWERSHELL_READ_CANCELLED = "powershell_read_cancelled"
+    POWERSHELL_READ_TIMEOUT = "powershell_read_timeout"
+    POWERSHELL_READ_FAILED = "powershell_read_failed"
+    POWERSHELL_READ_INVALID_OUTPUT = "powershell_read_invalid_output"
 
 
 @dataclass(frozen=True)
