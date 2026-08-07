@@ -326,7 +326,7 @@ class PetWindow(QWidget):
         recent = menu.addAction('最近の検索結果', self.show_recent_search)
         recent.setEnabled(self.search_store.latest() is not None)
         cancel = menu.addAction('処理をキャンセル', self.cancel_current_processing)
-        cancel.setEnabled((self.input_bubble.pending or self.launch_controller.is_busy) and not self.input_bubble.cancel_requested)
+        cancel.setEnabled((self.input_bubble.pending or self.launch_controller.is_busy or self.process_stop_controller.is_busy) and not self.input_bubble.cancel_requested)
         menu.addSeparator()
         menu.addAction('チャットを開く', self.open_chat)
         menu.addAction('チャットを閉じる', self.close_chat)
@@ -375,6 +375,9 @@ class PetWindow(QWidget):
             self.search_results_window._populate()
         self.search_results_window.show(); self.search_results_window.raise_(); self.search_results_window.activateWindow()
     def cancel_current_processing(self):
+        if self.process_stop_controller.is_busy:
+            self.process_stop_controller.cancel()
+            return True
         if self.launch_controller.is_busy:
             self.launch_controller.cancel()
             return True
@@ -388,6 +391,7 @@ class PetWindow(QWidget):
             return
         self._shutdown_complete = True
         self._hover_timer.stop(); self._stop_frame_timer()
+        self.process_stop_controller.shutdown()
         self.launch_controller.shutdown()
         self.input_bubble.close()
         if self.character_editor_window is not None: self.character_editor_window.shutdown()
