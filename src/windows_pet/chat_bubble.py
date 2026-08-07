@@ -364,9 +364,9 @@ class InputBubble(BubbleFrame):
     pointer_left = Signal()
     focus_state_changed = Signal(bool)
     draft_state_changed = Signal(bool)
-    closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict); api_settings_requested=Signal(); application_launch_requested=Signal(object); application_launch_ready=Signal(object); cancel_processing_requested=Signal()
+    closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict); api_settings_requested=Signal(); application_launch_requested=Signal(object); application_launch_ready=Signal(object); process_stop_ready=Signal(object); cancel_processing_requested=Signal()
     def __init__(self, pet, worker_factory=AIWorker):
-        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self._pending=False; self._local_action_pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False; self._active_user_text=None; self._retry_text=None; self._last_error_kind=None; self._pending_application_launch_request=None
+        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self._pending=False; self._local_action_pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False; self._active_user_text=None; self._retry_text=None; self._last_error_kind=None; self._pending_application_launch_request=None; self._pending_process_stop_request=None
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.card=QFrame(self); self.card.setStyleSheet('QFrame{background:#20242b;border:0;}')
         # A layered top-level window must never receive an effect whose expanded
@@ -511,6 +511,8 @@ class InputBubble(BubbleFrame):
             self._worker.application_launch_requested.connect(
                 self._on_application_launch_requested, Qt.ConnectionType.QueuedConnection
             )
+        if hasattr(self._worker, "process_stop_requested"):
+            self._worker.process_stop_requested.connect(self._on_process_stop_requested, Qt.ConnectionType.QueuedConnection)
         if hasattr(self._worker, "application_launch_handed_off"):
             self._worker.application_launch_handed_off.connect(
                 self._on_local_action_handed_off, Qt.ConnectionType.QueuedConnection
@@ -597,6 +599,10 @@ class InputBubble(BubbleFrame):
     def _on_application_launch_requested(self, request):
         self._pending_application_launch_request = request
 
+    @Slot(object)
+    def _on_process_stop_requested(self, request):
+        self._pending_process_stop_request = request
+
     @Slot(str)
     def _on_powershell_started(self, area: str) -> None:
         self._show_response_status('Windowsの状態を調査しています…')
@@ -609,6 +615,9 @@ class InputBubble(BubbleFrame):
         request, self._pending_application_launch_request = self._pending_application_launch_request, None
         if request is not None and self._local_action_pending and not self._cancel_requested:
             self.application_launch_ready.emit(request)
+        request, self._pending_process_stop_request = self._pending_process_stop_request, None
+        if request is not None and self._local_action_pending and not self._cancel_requested:
+            self.process_stop_ready.emit(request)
 
     def show_local_action_status(self, text):
         if not self._local_action_pending:

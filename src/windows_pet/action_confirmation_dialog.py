@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QPlainTextEdit
 
 from .action_models import ActionProposal, ConfirmationDecision, ConfirmationResponse
 from .confirmation_gate import ConfirmationSession
@@ -19,7 +19,12 @@ class ActionConfirmationDialog(QDialog):
         self.approve_button.clicked.connect(self.approve); self.cancel_button.clicked.connect(lambda: self._finish(ConfirmationDecision.CANCEL))
         detail = f"操作: {proposal.preview.operation}\n対象: {proposal.target.display_name}\n影響: {proposal.preview.impact}"
         if proposal.target.kind == "local_application": detail = f"アプリ名: {proposal.target.display_name}\n実行ファイル: {proposal.target.identifier}\n操作: アプリ起動\n影響: {proposal.preview.impact}\n管理者権限: 不要\nコマンドライン引数: なし\n起動後にWindowsPetから自動終了しません"
-        layout = QVBoxLayout(self); layout.addWidget(QLabel(detail)); layout.addWidget(self.status)
+        layout = QVBoxLayout(self); layout.addWidget(QLabel(detail))
+        if proposal.confirmation_type.value == "script_review":
+            p = proposal.preview
+            layout.addWidget(QLabel(f"Purpose: {p.purpose}\nTarget: {p.target}\nSHA-256: {p.script_sha256_short}\nBackend: {p.backend}\nWorking directory: {p.working_directory_display}\nEnvironment: {p.environment_summary}\nExpected changes: {p.expected_changes}\nRequires admin: {p.requires_admin_display}\nTimeout: {p.timeout_display}\nVerification: {p.verification_plan}\nRollback: {p.rollback_plan or 'None'}"))
+            script = QPlainTextEdit(p.script_text); script.setReadOnly(True); script.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap); script.setMinimumHeight(180); layout.addWidget(script)
+        layout.addWidget(self.status)
         buttons = QHBoxLayout(); buttons.addWidget(self.cancel_button); buttons.addWidget(self.approve_button); layout.addLayout(buttons)
         self.cancel_button.setFocus(); self.timer = QTimer(self); self.timer.timeout.connect(self._check_expiry); self.timer.start(250); self._check_expiry()
 

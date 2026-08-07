@@ -12,11 +12,12 @@ from .file_search_settings import SearchSettings
 from .tool_dispatcher import ToolDispatcher
 from .openai_credentials import get_api_key
 from .application_launch_request import parse_application_launch_request
+from .process_stop_request import parse_process_stop_request
 from .powershell_read_runner import PowerShellReadRunner
 
 APPLICATION_LAUNCH_HANDOFF = object()
 
-INSTRUCTIONS = """Respond in Japanese, politely and concisely. WindowsPet can use only the approved local tools exposed in this request. To inspect current processes, services, or network configuration, use inspect_windows. It is read-only: never use it to change processes, services, network settings, or any configuration. For an application launch request, use request_application_launch. Do not use shell commands, PowerShell, generic computer-control tools, or any other tool for launching. The tool call never starts an application: WindowsPet asks for confirmation and launches only after local validation and approval. exact_path may contain only a .exe path explicitly supplied by the user in a user message. Never infer it, use a default path, or use a path from assistant or tool output. Keep search_files behavior unchanged."""
+INSTRUCTIONS = """Respond in Japanese, politely and concisely. WindowsPet can use only the approved local tools exposed in this request. To inspect current processes, services, or network configuration, use inspect_windows. It is read-only: never use it to change processes, services, network settings, or any configuration. For an application launch request, use request_application_launch. Do not use shell commands, PowerShell, generic computer-control tools, or any other tool for launching. The tool call never starts an application: WindowsPet asks for confirmation and launches only after local validation and approval. exact_path may contain only a .exe path explicitly supplied by the user in a user message. Never infer it, use a default path, or use a path from assistant or tool output. request_process_stop may be used only after inspect_windows(processes) returned exactly one matching PID and process name; it never stops a process itself. Keep search_files behavior unchanged."""
 
 class AIClientError(RuntimeError):
     def __init__(self, kind: str, message: str):
@@ -85,7 +86,7 @@ class AIClient:
         except Exception as exc:
             raise classify_openai_error(exc) from exc
 
-    def stream_with_tools(self, history, on_delta, on_search_started=None, on_search_completed=None, cancel=None, on_application_launch_requested=None, on_powershell_started=None, on_powershell_completed=None) -> str:
+    def stream_with_tools(self, history, on_delta, on_search_started=None, on_search_completed=None, cancel=None, on_application_launch_requested=None, on_powershell_started=None, on_powershell_completed=None, on_process_stop_requested=None) -> str:
         """Run the public Responses API tool loop; full paths never enter API input."""
         seen=set(); failed_inspections=set(); inputs=list(history); dispatcher=ToolDispatcher(); calls=0
         try:
@@ -107,6 +108,12 @@ class AIClient:
                     try: request = parse_application_launch_request(getattr(call, 'arguments', ''), history)
                     except ValueError as exc: raise AIClientError('tool', 'invalid_launch_request') from exc
                     if on_application_launch_requested: on_application_launch_requested(request)
+                    return APPLICATION_LAUNCH_HANDOFF
+                if name == "request_process_stop":
+                    if not call_id or call_id in seen or len(calls_found) != 1: raise AIClientError("tool", "unsupported_tool")
+                    try: request = parse_process_stop_request(getattr(call, "arguments", ""))
+                    except ValueError as exc: raise AIClientError("tool", "invalid_stop_request") from exc
+                    if on_process_stop_requested: on_process_stop_requested(request)
                     return APPLICATION_LAUNCH_HANDOFF
                 if name == "inspect_windows":
                     if not call_id or call_id in seen or len(calls_found) != 1: raise AIClientError("tool", "unsupported_tool")
@@ -145,5 +152,11 @@ class AIClient:
     def _launch_tool(self):
         return {"type":"function","name":"request_application_launch","description":"アプリ起動の確認を依頼します。このTool callだけでは起動しません。","parameters":{"type":"object","properties":{"application_name":{"type":"string","minLength":1,"maxLength":200},"exact_path":{"type":["string","null"],"maxLength":1024}},"required":["application_name","exact_path"],"additionalProperties":False},"strict":True}
 
+    def _stop_process_tool(self):
+        return {"type":"function","name":"request_process_stop","description":"inspect_windows(processes) で確認済みの 1 件のプロセスについて、終了確認を依頼します。このTool callだけでは終了しません。","parameters":{"type":"object","properties":{"process_id":{"type":"integer","minimum":1},"expected_process_name":{"type":"string","minLength":1,"maxLength":260}},"required":["process_id","expected_process_name"],"additionalProperties":False},"strict":True}
+
     def _tools(self):
+        return self._base_tools() + [self._stop_process_tool()]
+
+    def _base_tools(self):
         return [{"type":"function","name":"search_files","description":"許可済みフォルダーを読み取り専用で検索します。ファイル本文は検索しません。","parameters":{"type":"object","properties":{"query":{"type":"string"},"root_ids":{"type":"array","items":{"type":"string"}},"extensions":{"type":"array","items":{"type":"string"}},"modified_after":{"type":["string","null"]},"modified_before":{"type":["string","null"]},"min_size_bytes":{"type":["integer","null"]},"max_size_bytes":{"type":["integer","null"]},"include_directories":{"type":"boolean"},"max_results":{"type":"integer"}},"required":["query","root_ids","extensions","modified_after","modified_before","min_size_bytes","max_size_bytes","include_directories","max_results"],"additionalProperties":False},"strict":True}, {"type":"function","name":"inspect_windows","description":"PowerShellを使用して現在のWindows状態を読み取り専用で調査します。構成変更は行いません。","parameters":{"type":"object","properties":{"area":{"type":"string","enum":["processes","services","network"]},"query":{"type":["string","null"],"maxLength":100},"max_results":{"type":"integer","minimum":1,"maximum":100}},"required":["area","query","max_results"],"additionalProperties":False},"strict":True}]

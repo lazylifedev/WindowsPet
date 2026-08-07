@@ -32,6 +32,7 @@ class ConfirmationType(str, Enum):
     PLAN_IMPACT = "plan_impact"
     EXTERNAL_SEND = "external_send"
     INSTALLATION = "installation"
+    SCRIPT_REVIEW = "script_review"
 
 
 class PolicyDecision(str, Enum):
@@ -129,6 +130,23 @@ class InstallationActionPreview(ActionPreview):
     category: ConfirmationType = ConfirmationType.INSTALLATION
 
 
+@dataclass(frozen=True)
+class ScriptReviewActionPreview(ActionPreview):
+    purpose: str = ""
+    target: str = ""
+    script_text: str = ""
+    script_sha256_short: str = ""
+    backend: str = ""
+    working_directory_display: str = ""
+    environment_summary: str = ""
+    expected_changes: str = ""
+    requires_admin_display: str = ""
+    timeout_display: str = ""
+    verification_plan: str = ""
+    rollback_plan: str = ""
+    category: ConfirmationType = ConfirmationType.SCRIPT_REVIEW
+
+
 def validate_contract(contract: ToolContract) -> None:
     if not all(isinstance(value, str) and value.strip() for value in (contract.name, contract.version, contract.operation, contract.verification_method)):
         raise ValueError("invalid_contract")
@@ -151,6 +169,7 @@ def validate_preview(preview: ActionPreview, confirmation: ConfirmationType) -> 
         ConfirmationType.PLAN_IMPACT: (PlanImpactActionPreview, ("purpose", "impact", "rollback_summary", "button_label")),
         ConfirmationType.EXTERNAL_SEND: (ExternalSendActionPreview, ("recipient", "destination_type", "visibility", "button_label")),
         ConfirmationType.INSTALLATION: (InstallationActionPreview, ("product_name", "publisher", "package_id", "installation_method", "expected_changes", "button_label")),
+        ConfirmationType.SCRIPT_REVIEW: (ScriptReviewActionPreview, ("purpose", "operation", "target", "impact", "button_label", "script_text", "script_sha256_short", "backend", "working_directory_display", "environment_summary", "expected_changes", "requires_admin_display", "timeout_display", "verification_plan")),
     }
     if confirmation is ConfirmationType.NONE:
         return

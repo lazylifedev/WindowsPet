@@ -22,6 +22,7 @@ from .help_window import HelpWindow
 from .local_inspection_window import LocalInspectionWindow
 from .audit_log import JsonlAuditSink
 from .chat_application_launch_controller import ChatApplicationLaunchController
+from .chat_process_stop_controller import ChatProcessStopController
 from .ai_worker import AIWorker
 from .character_runtime_events import CharacterRuntimeEventDispatcher
 
@@ -59,6 +60,7 @@ class PetWindow(QWidget):
         self.audit_sink = audit_sink or JsonlAuditSink(position_path.parent / "audit.jsonl")
         self.input_bubble = InputBubble(self, worker_factory=lambda history: AIWorker(history, audit=self.audit_sink))
         self.launch_controller = ChatApplicationLaunchController(self.input_bubble.complete_local_action, self, self.audit_sink, show_status=self.input_bubble.show_local_action_status)
+        self.process_stop_controller = ChatProcessStopController(self.input_bubble.complete_local_action, self, self.audit_sink)
         self.search_store = SearchResultStore()
         self.search_settings_window = None
         self.search_results_window = None
@@ -71,6 +73,7 @@ class PetWindow(QWidget):
         self._quit_callback = quit_callback or QApplication.quit
         self.input_bubble.search_completed.connect(self._on_search_completed)
         self.input_bubble.application_launch_ready.connect(self.launch_controller.request)
+        self.input_bubble.process_stop_ready.connect(self.process_stop_controller.request)
         self.input_bubble.cancel_processing_requested.connect(self.cancel_current_processing)
         self.input_bubble.api_settings_requested.connect(self.open_openai_settings)
         self._pet_hovered = False; self._input_hovered = False; self._input_has_focus = False

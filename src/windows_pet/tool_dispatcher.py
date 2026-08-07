@@ -9,6 +9,7 @@ from .file_search_models import SearchRequest
 from .file_search_service import FileSearchService
 from .file_search_settings import SearchSettings
 from .powershell_read_models import WindowsInspectionArea, WindowsInspectionRequest
+from .process_stop_request import parse_process_stop_request
 
 class ToolDispatcher:
     """Validates model arguments locally before any filesystem access."""
@@ -25,6 +26,10 @@ class ToolDispatcher:
         result = self.service.search(request, cancel)
         result['results'] = [r.__dict__ | {'modified_at': r.modified_at.isoformat()} for r in result['results']]
         return result
+
+    @staticmethod
+    def parse_process_stop(arguments: str | dict):
+        return parse_process_stop_request(arguments)
 
     @staticmethod
     def parse_windows_inspection(arguments: str | dict) -> WindowsInspectionRequest:
