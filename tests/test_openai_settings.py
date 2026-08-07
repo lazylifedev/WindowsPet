@@ -35,13 +35,14 @@ def test_unsaved_key_enables_controls_and_has_priority(qapp, monkeypatch):
     window.key.setText("test-only-key"); qapp.processEvents()
     assert window.check.isEnabled() and window.save.isEnabled() and window._connection_key() == "test-only-key"
     window.key.clear(); qapp.processEvents(); assert not window.check.isEnabled() and not window.save.isEnabled()
-    window.close()
+    window.close(); window.deleteLater(); qapp.processEvents()
 
-def test_connection_key_prefers_environment(monkeypatch):
+def test_connection_key_prefers_environment(qapp, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "environment-key")
     monkeypatch.setattr("windows_pet.openai_settings_window.get_api_key", lambda: "environment-key")
     from windows_pet.openai_settings_window import OpenAISettingsWindow
-    window = OpenAISettingsWindow(); assert window._connection_key() == "environment-key"; window.close()
+    window = OpenAISettingsWindow(); assert window._connection_key() == "environment-key"
+    window.close(); window.deleteLater(); qapp.processEvents()
 
 def test_unconfigured_key_is_none(monkeypatch):
     monkeypatch.setattr("windows_pet.openai_credentials._keyring", lambda: None); monkeypatch.delenv("OPENAI_API_KEY", raising=False)

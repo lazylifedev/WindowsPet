@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPoint, QRect, Qt
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QThread, Slot, qInstallMessageHandler
 from PySide6.QtGui import QEnterEvent, QFocusEvent, QKeyEvent, QPaintEvent
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtCore import QPointF, QObject, Signal
@@ -33,6 +33,29 @@ class FakeWorker(QObject):
     def run(self): self.finished.emit("fake response")
 
 
+class PowerShellStatusWorker(QObject):
+    """Emits inspection progress only from its assigned worker thread."""
+    delta = Signal(str)
+    finished = Signal(str)
+    failed = Signal(str, str)
+    search_started = Signal()
+    search_completed = Signal(dict)
+    powershell_started = Signal(str)
+    powershell_completed = Signal(dict)
+
+    def __init__(self, history):
+        super().__init__()
+
+    @Slot()
+    def run(self):
+        self.powershell_started.emit("processes")
+        self.powershell_completed.emit({"items": []})
+        self.finished.emit("確認しました")
+
+    def cancel(self):
+        pass
+
+
 def make_chat(qapp):
     chat = ChatBubble(Pet(), worker_factory=FakeWorker); chat.show(); qapp.processEvents(); return chat
 
@@ -40,6 +63,40 @@ def make_chat(qapp):
 def close_chat(chat, qapp):
     chat.close(); qapp.processEvents()
     assert chat._thread is None and chat._worker is None
+
+
+def test_powershell_status_signals_update_qtextdocument_on_ui_thread(qapp, qtbot):
+    """Queued QObject slots keep QTextDocument changes off the worker QThread."""
+    warnings, status_threads, statuses = [], [], []
+    previous_handler = qInstallMessageHandler(
+        lambda _mode, _context, message: warnings.append(message)
+    )
+    chat = ChatBubble(Pet(), worker_factory=PowerShellStatusWorker)
+    original_show_status = chat._show_response_status
+
+    def record_status(text):
+        status_threads.append(QThread.currentThread())
+        statuses.append(text)
+        original_show_status(text)
+
+    chat._show_response_status = record_status
+    try:
+        assert chat._start_request("プロセスを確認して", clear_input=True)
+        worker_thread = chat._thread
+        qtbot.waitUntil(lambda: chat._thread is None, timeout=3000)
+        qapp.processEvents()
+        assert statuses == ["Windowsの状態を調査しています…", "調査結果を確認しています…"]
+        assert status_threads == [qapp.thread(), qapp.thread()]
+        assert chat.response_bubble.label.document().toPlainText() == "確認しました"
+        assert not worker_thread.isRunning()
+        assert not any("Cannot create children for a parent that is in a different thread" in warning
+                           for warning in warnings)
+        assert not any("QThread: Destroyed while thread is still running" in warning
+                           for warning in warnings)
+    finally:
+        chat.close()
+        qapp.processEvents()
+        qInstallMessageHandler(previous_handler)
 
 
 def test_bubbles_and_input_keyboard_contract(qapp):

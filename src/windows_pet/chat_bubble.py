@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QThread, Qt, Signal, QTimer
+from PySide6.QtCore import QEvent, QPoint, QRect, QThread, Qt, Signal, Slot, QTimer
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QDialog, QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
     QLabel, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget, QApplication, QTextBrowser, QMenu, QMessageBox)
@@ -372,17 +372,31 @@ class InputBubble(BubbleFrame):
         self.conversation.add_user(text); self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking'); self.response_bubble.setText('考え中…'); self._position_response(); self.response_bubble.show()
         self._refresh_history_window()
         self._thread=QThread(self); self._worker=self._worker_factory(self.conversation.messages()); self._worker.moveToThread(self._thread); self._update_primary_button()
-        self._thread.started.connect(self._worker.run); self._worker.delta.connect(self._on_delta); self._worker.search_started.connect(self._on_search_started); self._worker.search_completed.connect(self._on_search_completed)
+        self._thread.started.connect(self._worker.run)
+        self._worker.delta.connect(self._on_delta, Qt.ConnectionType.QueuedConnection)
+        self._worker.search_started.connect(self._on_search_started, Qt.ConnectionType.QueuedConnection)
+        self._worker.search_completed.connect(self._on_search_completed, Qt.ConnectionType.QueuedConnection)
         if hasattr(self._worker, "powershell_started"):
-            self._worker.powershell_started.connect(lambda _area: self._show_response_status('Windowsの状態を調査しています…'))
+            self._worker.powershell_started.connect(
+                self._on_powershell_started, Qt.ConnectionType.QueuedConnection
+            )
         if hasattr(self._worker, "powershell_completed"):
-            self._worker.powershell_completed.connect(lambda _result: self._show_response_status('調査結果を確認しています…'))
+            self._worker.powershell_completed.connect(
+                self._on_powershell_completed, Qt.ConnectionType.QueuedConnection
+            )
         if hasattr(self._worker, "application_launch_requested"):
-            self._worker.application_launch_requested.connect(self._on_application_launch_requested)
+            self._worker.application_launch_requested.connect(
+                self._on_application_launch_requested, Qt.ConnectionType.QueuedConnection
+            )
         if hasattr(self._worker, "application_launch_handed_off"):
-            self._worker.application_launch_handed_off.connect(self._on_local_action_handed_off)
+            self._worker.application_launch_handed_off.connect(
+                self._on_local_action_handed_off, Qt.ConnectionType.QueuedConnection
+            )
             self._worker.application_launch_handed_off.connect(self._thread.quit)
-        self._worker.finished.connect(self._on_finished); self._worker.failed.connect(self._on_failed); self._worker.finished.connect(self._thread.quit); self._worker.failed.connect(self._thread.quit); self._thread.finished.connect(self._thread_done); self._thread.start(); return True
+        self._worker.finished.connect(self._on_finished, Qt.ConnectionType.QueuedConnection)
+        self._worker.failed.connect(self._on_failed, Qt.ConnectionType.QueuedConnection)
+        self._worker.finished.connect(self._thread.quit); self._worker.failed.connect(self._thread.quit)
+        self._thread.finished.connect(self._thread_done, Qt.ConnectionType.QueuedConnection); self._thread.start(); return True
     def _position_response(self):
         if not hasattr(self.pet, 'frameGeometry'): return
         screen=self.pet.screen() if hasattr(self.pet, 'screen') else None; area=(screen or QApplication.primaryScreen()).availableGeometry(); r=self.response_bubble
@@ -408,20 +422,24 @@ class InputBubble(BubbleFrame):
         if self.pending:
             self.response_bubble.show()
 
+    @Slot()
     def _on_search_started(self):
         self._search_in_progress=True; self._search_status_active=True
         self._show_response_status('ファイルを検索しています…')
         self.search_started.emit()
 
+    @Slot(dict)
     def _on_search_completed(self, result):
         self._search_in_progress=False
         self._show_response_status('検索結果を整理しています…')
         self.search_completed.emit(result)
 
+    @Slot(str)
     def _on_delta(self,text):
         if self._search_status_active:
             self._reply_text=''; self._search_status_active=False
         self._reply_text+=text; self.response.setText(self._reply_text); self.response_bubble.setText(self._reply_text); self.response_bubble.set_copy_enabled(False); self.response_bubble.set_actions_enabled(False); self._position_response()
+    @Slot(str)
     def _on_finished(self,text):
         self._search_status_active=False
         self._retry_text=None
@@ -431,6 +449,7 @@ class InputBubble(BubbleFrame):
         self._refresh_history_window()
         if not text.strip(): self.response_bubble.hide()
         self._complete()
+    @Slot(str, str)
     def _on_failed(self,kind,message):
         self._pending_application_launch_request = None
         active=self._active_user_text
@@ -443,6 +462,7 @@ class InputBubble(BubbleFrame):
         self._pending=False; self._local_action_pending=False; self._search_in_progress=False; self._cancel_requested=False; self._update_primary_button(); self.send_finished.emit()
         self._refresh_history_window(refresh_messages=False)
         if not self.response_pinned: self._schedule_response_auto_hide()
+    @Slot()
     def _on_local_action_handed_off(self):
         self._pending = False
         self._local_action_pending = True
@@ -450,8 +470,17 @@ class InputBubble(BubbleFrame):
         self._update_primary_button()
         self._refresh_history_window(refresh_messages=False)
 
+    @Slot(object)
     def _on_application_launch_requested(self, request):
         self._pending_application_launch_request = request
+
+    @Slot(str)
+    def _on_powershell_started(self, area: str) -> None:
+        self._show_response_status('Windowsの状態を調査しています…')
+
+    @Slot(dict)
+    def _on_powershell_completed(self, result: dict) -> None:
+        self._show_response_status('調査結果を確認しています…')
 
     def _emit_pending_application_launch_request(self):
         request, self._pending_application_launch_request = self._pending_application_launch_request, None
@@ -473,6 +502,7 @@ class InputBubble(BubbleFrame):
     def _auto_hide_response(self, generation=None):
         if generation is not None and generation != self._response_generation: return
         if not self.pending and not self.response_pinned:self.response_bubble.hide()
+    @Slot()
     def _thread_done(self):
         self._thread=None; self._worker=None
         if self._local_action_pending:
