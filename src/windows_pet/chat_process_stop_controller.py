@@ -11,6 +11,7 @@ from .confirmation_gate import ConfirmationGate
 from .process_stop import (PowerShellExecutionProposalFactory, PowerShellExecutionRunner,
                            PowerShellExecutionStatus, ProcessIdentityResolver,
                            ProcessValidationCode, STOP_PROCESS_CONTRACT)
+from .process_stop import ProcessResolutionCode
 
 
 class ProcessIdentityResolutionWorker(QObject):
@@ -31,11 +32,11 @@ class ProcessIdentityResolutionWorker(QObject):
             if self.cancel.is_set():
                 self.finished.emit(None, "cancelled")
             elif identity is None:
-                self.finished.emit(None, ProcessValidationCode.MISSING)
+                self.finished.emit(None, getattr(self.resolver, "last_resolution_code", ProcessResolutionCode.NOT_FOUND))
             else:
                 self.finished.emit(identity, self.resolver.validate(identity, self.request.expected_process_name))
         except Exception:
-            self.finished.emit(None, ProcessValidationCode.MISSING)
+            self.finished.emit(None, ProcessResolutionCode.RESOLVER_FAILED)
 
 
 class ProcessStopWorker(QObject):
@@ -114,8 +115,11 @@ class ChatProcessStopController(QObject):
         if code == "cancelled" or self._cancel.is_set():
             self._finish("プロセスの終了をキャンセルしました。")
             return
-        if identity is None or code is ProcessValidationCode.MISSING:
+        if identity is None and (code is ProcessResolutionCode.NOT_FOUND or code is ProcessValidationCode.MISSING):
             self._finish("対象のプロセスは見つかりませんでした。")
+            return
+        if identity is None:
+            self._finish(f"プロセス情報を確認できなかったため、終了を実行できませんでした。({getattr(code, 'value', code)})")
             return
         if code is ProcessValidationCode.PROTECTED:
             self._finish("このプロセスは WindowsPet から終了できません。")

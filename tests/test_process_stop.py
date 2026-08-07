@@ -6,6 +6,8 @@ from windows_pet.confirmation_gate import ConfirmationGate
 from windows_pet.process_stop import (ProcessIdentity, ProcessIdentityResolver,
     ProcessValidationCode, PowerShellExecutionProposalFactory, STOP_PROCESS_CONTRACT,
     PowerShellExecutionRunner, PowerShellExecutionStatus, canonical_script, script_sha256)
+from windows_pet.process_stop import PROCESS_IDENTITY_RESOLVER_SCRIPT
+import json
 from windows_pet.process_stop_request import parse_process_stop_request
 
 def test_script_canonicalization_is_stable_and_rejects_controls():
@@ -34,6 +36,22 @@ def test_stop_proposal_requires_script_review_and_hash_bound():
     gate = ConfirmationGate(); _, session = gate.prepare(STOP_PROCESS_CONTRACT, proposal)
     grant = gate.decide(STOP_PROCESS_CONTRACT, proposal, ConfirmationResponse(ConfirmationDecision.APPROVE, session.session_id, proposal.proposal_id, proposal.fingerprint)).grant
     assert grant is not None
+
+def test_identity_resolver_passes_pid_through_restricted_json_environment(tmp_path):
+    backend = tmp_path / "powershell.exe"; backend.write_bytes(b"fake")
+    calls = []
+    class Result:
+        returncode = 0
+        stdout = "Notepad|12345"
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs)); return Result()
+    resolver = ProcessIdentityResolver(run=run, powershell_exe=backend)
+    assert resolver.resolve(123) == ProcessIdentity(123, "Notepad", "12345")
+    argv, kwargs = calls[0]
+    assert argv[:4] == [str(backend), "-NoLogo", "-NoProfile", "-NonInteractive"]
+    assert argv[4] == "-Command" and argv[5] == PROCESS_IDENTITY_RESOLVER_SCRIPT
+    assert json.loads(kwargs["env"]["WINDOWSPET_PS_PARAMETERS"]) == {"pid": 123}
+    assert kwargs["shell"] is False and kwargs["cwd"] == str(tmp_path)
 
 class _CompletedProcess:
     returncode = 0

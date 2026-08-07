@@ -24,6 +24,22 @@ Stop-Process -Id ([int]$params.pid) -ErrorAction Stop
 '''
 STOP_PROCESS_TEMPLATE_ID = "windows_pet.stop_process.v1"
 STOP_PROCESS_ENVIRONMENT_KEYS = ("WINDOWSPET_PS_PARAMETERS",)
+PROCESS_IDENTITY_RESOLVER_SCRIPT = '''$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+try {
+    $params = $env:WINDOWSPET_PS_PARAMETERS | ConvertFrom-Json
+    if ($null -eq $params -or $null -eq $params.pid) { exit 46 }
+    $pidValue = 0
+    if (-not [int]::TryParse([string]$params.pid, [ref]$pidValue) -or $pidValue -lt 1) { exit 46 }
+    $p = Get-Process -Id $pidValue -ErrorAction Stop
+    [Console]::Out.Write($p.ProcessName + '|' + $p.StartTime.ToUniversalTime().Ticks)
+    exit 0
+} catch [Microsoft.PowerShell.Commands.ProcessCommandException] {
+    exit 44
+} catch {
+    exit 46
+}
+'''
 PROTECTED_PROCESS_NAMES = frozenset({"system", "idle", "registry", "smss", "csrss", "wininit", "winlogon", "services", "lsass"})
 STOP_PROCESS_CONTRACT = ToolContract("powershell_executor", "1", "stop_process", SideEffect.PROCESS_CONTROL,
     ConfirmationType.SCRIPT_REVIEW, False, False, True, 10.0, "target process absence or identity replacement", ("status", "result_code", "verification_result"))
@@ -47,23 +63,60 @@ class ProcessIdentity:
 class ProcessValidationCode(str, Enum):
     OK="ok"; MISSING="missing"; NAME_MISMATCH="name_mismatch"; IDENTITY_CHANGED="identity_changed"; PROTECTED="protected"
 
+class ProcessResolutionCode(str, Enum):
+    MATCHED="matched"; NOT_FOUND="not_found"; RESOLVER_FAILED="resolver_failed"; RESOLVER_TIMEOUT="resolver_timeout"; INVALID_OUTPUT="invalid_output"
+    BACKEND_UNAVAILABLE="backend_unavailable"; SPAWN_FAILED="spawn_failed"; NONZERO_EXIT="nonzero_exit"
+
 class ProcessIdentityResolver:
     """Reads exactly one local process identity; malformed PowerShell output fails closed."""
-    def __init__(self, lookup: Callable[[int], ProcessIdentity | None] | None = None, self_pid: Callable[[], int] = os.getpid, run=subprocess.run):
+    def __init__(self, lookup: Callable[[int], ProcessIdentity | None] | None = None, self_pid: Callable[[], int] = os.getpid, run=subprocess.run, powershell_exe=None, working_directory=None):
         self.lookup, self.self_pid, self.run = lookup, self_pid, run
+        self.powershell_exe, self.working_directory = powershell_exe, working_directory
+        self.last_resolution_code = ProcessResolutionCode.NOT_FOUND
     def resolve(self, pid: int) -> ProcessIdentity | None:
-        if type(pid) is not int or pid < 1: return None
-        if self.lookup: return self.lookup(pid)
-        if os.name != "nt": return None
-        command = "$ErrorActionPreference='Stop';$p=Get-Process -Id $args[0] -ErrorAction Stop;[Console]::Out.Write($p.ProcessName+'|'+$p.StartTime.ToUniversalTime().Ticks)"
+        if type(pid) is not int or pid < 1:
+            self.last_resolution_code = ProcessResolutionCode.NOT_FOUND
+            return None
+        if self.lookup:
+            identity = self.lookup(pid)
+            self.last_resolution_code = ProcessResolutionCode.MATCHED if identity is not None else ProcessResolutionCode.NOT_FOUND
+            return identity
+        executable = self.powershell_exe
+        if executable is None and os.name == "nt":
+            executable = Path(os.environ.get("SystemRoot", r"C:\\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        if executable is None or not Path(executable).is_absolute() or not Path(executable).is_file():
+            self.last_resolution_code = ProcessResolutionCode.BACKEND_UNAVAILABLE
+            return None
+        command = PROCESS_IDENTITY_RESOLVER_SCRIPT
         try:
-            result = self.run(["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command, str(pid)], capture_output=True, text=True, timeout=3, shell=False)
+            env = {
+                "WINDOWSPET_PS_PARAMETERS": json.dumps({"pid": pid}, separators=(",", ":")),
+                "SystemRoot": os.environ.get("SystemRoot", r"C:\\Windows"),
+                "WINDIR": os.environ.get("WINDIR", r"C:\\Windows"),
+            }
+            result = self.run([str(executable), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, timeout=3, shell=False, env=env, cwd=str(self.working_directory) if self.working_directory else str(Path(executable).parent))
             output = result.stdout.strip()
-            if result.returncode != 0 or output.count("|") != 1: return None
+            if result.returncode != 0:
+                self.last_resolution_code = ProcessResolutionCode.NOT_FOUND if result.returncode == 44 else ProcessResolutionCode.RESOLVER_FAILED if result.returncode == 46 else ProcessResolutionCode.NONZERO_EXIT
+                return None
+            if output.count("|") != 1:
+                self.last_resolution_code = ProcessResolutionCode.INVALID_OUTPUT
+                return None
             name, token = output.split("|")
-            if not name or not token or not token.isascii() or not token.isdecimal() or int(token) <= 0: return None
+            if not name or not token or not token.isascii() or not token.isdecimal() or int(token) <= 0:
+                self.last_resolution_code = ProcessResolutionCode.INVALID_OUTPUT
+                return None
+            self.last_resolution_code = ProcessResolutionCode.MATCHED
             return ProcessIdentity(pid, name, token)
-        except (OSError, subprocess.SubprocessError, ValueError): return None
+        except subprocess.TimeoutExpired:
+            self.last_resolution_code = ProcessResolutionCode.RESOLVER_TIMEOUT
+            return None
+        except OSError:
+            self.last_resolution_code = ProcessResolutionCode.SPAWN_FAILED
+            return None
+        except (subprocess.SubprocessError, ValueError):
+            self.last_resolution_code = ProcessResolutionCode.RESOLVER_FAILED
+            return None
     def validate(self, identity: ProcessIdentity, expected_name: str | None = None) -> ProcessValidationCode:
         if not isinstance(identity, ProcessIdentity) or identity.pid in (0, 4) or identity.pid == self.self_pid() or identity.process_name.casefold() in PROTECTED_PROCESS_NAMES: return ProcessValidationCode.PROTECTED
         if expected_name and identity.process_name.casefold() != expected_name.strip().casefold(): return ProcessValidationCode.NAME_MISMATCH
