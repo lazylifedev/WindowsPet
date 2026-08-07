@@ -42,6 +42,10 @@ def test_resource_path_requires_meipass(monkeypatch):
     with pytest.raises(RuntimeError, match='sys._MEIPASS'):
         resource_path('assets/animations/manifest.json')
 def test_missing_asset_error(tmp_path, qapp):
+    (tmp_path / 'manifest.json').write_text(json.dumps({'animations': {}}))
+    with pytest.raises(RuntimeError, match='invalid_manifest'):
+        load_animations(tmp_path)
+    return
     manifest = {'animations': {'x': {'frame_count': 1, 'fps_recommended': 1, 'frames': [{'file':'missing.png'}]}}}
     (tmp_path/'manifest.json').write_text(json.dumps(manifest))
     try: load_animations(tmp_path)

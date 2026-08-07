@@ -1,33 +1,14 @@
-import json
-from dataclasses import dataclass
+"""Compatibility access to the trusted bundled legacy animation assets."""
+
 from pathlib import Path
-from PySide6.QtGui import QPixmap
 
-@dataclass(frozen=True)
-class Animation:
-    name: str
-    frames: tuple[QPixmap, ...]
-    fps: int
-    loop: bool
+from .character_models import CharacterAnimation, CharacterPackageError
+from .character_package_loader import load_builtin_default_character
 
-def load_animations(root: Path) -> dict[str, Animation]:
-    manifest_path = root / "manifest.json"
+
+def load_animations(root: Path) -> dict[str, CharacterAnimation]:
+    """Keep the historical API without retaining a general-purpose loose loader."""
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"manifest.json を読み込めません: {exc}") from exc
-    result = {}
-    for name, spec in manifest.get("animations", {}).items():
-        count = int(spec["frame_count"])
-        files = spec.get("frames", [])
-        if len(files) < count:
-            raise RuntimeError(f"{name} のフレーム定義が不足しています")
-        frames = []
-        for item in files[:count]:
-            path = root / name / item["file"]
-            pixmap = QPixmap(str(path))
-            if pixmap.isNull():
-                raise RuntimeError(f"素材を読み込めません: {path}")
-            frames.append(pixmap)
-        result[name] = Animation(name, tuple(frames), max(1, int(spec["fps_recommended"])), bool(spec.get("loop", True)))
-    return result
+        return dict(load_builtin_default_character(root).animations)
+    except CharacterPackageError as exc:
+        raise RuntimeError(exc.code.value) from exc

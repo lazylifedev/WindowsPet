@@ -6,7 +6,8 @@ from PySide6.QtCore import QPoint, QRect, QTimer, Qt
 from PySide6.QtGui import QContextMenuEvent, QImage, QMouseEvent, QIcon
 from PySide6.QtWidgets import QApplication, QLabel, QMenu, QMessageBox, QWidget, QSystemTrayIcon
 
-from .animation import load_animations
+from .character_models import CharacterPackageError
+from .character_package_loader import load_character_with_fallback
 from .chat_bubble import InputBubble, chat_position, response_position
 from .paths import application_root, assets_root
 from .storage import constrain_to_primary, load_position, save_position
@@ -39,8 +40,8 @@ class PetWindow(QWidget):
         self.resize(200, 200)
         self._drag_offset = None; self._press_position = None; self._dragged = False
         self._last_activity = QTimer(self); self._last_activity.setSingleShot(True); self._last_activity.timeout.connect(lambda: self.play("sleep"))
-        self._timer = QTimer(self); self._timer.timeout.connect(self._next_frame)
-        self._animation = None; self._frame = 0
+        self._timer = QTimer(self); self._timer.setSingleShot(True); self._timer.timeout.connect(self._next_frame)
+        self._animation = None; self._frame = 0; self._animation_generation = 0
         self.audit_sink = audit_sink or JsonlAuditSink(position_path.parent / "audit.jsonl")
         self.input_bubble = InputBubble(self, worker_factory=lambda history: AIWorker(history, audit=self.audit_sink))
         self.launch_controller = ChatApplicationLaunchController(self.input_bubble.complete_local_action, self, self.audit_sink, show_status=self.input_bubble.show_local_action_status)
@@ -72,10 +73,13 @@ class PetWindow(QWidget):
     def play(self, name: str):
         if name == "sleep" and not self._can_sleep(): return
         if name not in self.animations: return
-        self._animation, self._frame = self.animations[name], 0; self._timer.stop(); self._show_frame(); self._timer.start(round(1000 / self._animation.fps))
+        self._animation_generation += 1
+        self._animation, self._frame = self.animations[name], 0
+        self._timer.stop(); self._show_frame(); self._schedule_current_frame()
         if name != "sleep" and not self.input_bubble.isVisible() and not self.input_bubble.pending: self._last_activity.start(30000)
 
-    def _show_frame(self): self.label.setPixmap(self._animation.frames[self._frame].scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    def _show_frame(self): self.label.setPixmap(self._animation.frames[self._frame].pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    def _schedule_current_frame(self): self._timer.start(self._animation.frames[self._frame].duration_ms)
     def visible_pet_rect(self):
         pixmap = self.label.pixmap()
         if pixmap is None or pixmap.isNull(): return self.frameGeometry()
@@ -90,12 +94,13 @@ class PetWindow(QWidget):
     def _next_frame(self):
         self._frame += 1
         if self._frame >= len(self._animation.frames):
-            if self._animation.name == "wave": self.play("idle"); return
-            self._frame = 0 if self._animation.loop else len(self._animation.frames) - 1
+            if self._animation.playback.value == "once": self.play("idle"); return
+            self._frame = 0
         self._show_frame()
+        self._schedule_current_frame()
     def resizeEvent(self, event): self.label.resize(self.size()); self._show_frame() if self._animation else None
     def _activity(self):
-        if self._animation.name == "sleep": self.play("idle")
+        if self._animation.event_id == "sleep": self.play("idle")
         if not self.input_bubble.isVisible() and not self.input_bubble.pending: self._last_activity.start(30000)
 
     def _can_sleep(self):
@@ -141,7 +146,7 @@ class PetWindow(QWidget):
         for name in ("idle", *self.animations.keys()):
             animation = self.animations.get(name)
             if animation and animation.frames:
-                pixmap = animation.frames[0]; break
+                pixmap = animation.frames[0].pixmap; break
         if pixmap is None: return False
         icon = QIcon(pixmap); self.setWindowIcon(icon)
         self.tray_menu = QMenu(self)
@@ -298,10 +303,15 @@ def main() -> int:
     logging.info("startup diagnostics frozen=%s manifest_present=%s", getattr(sys, "frozen", False), (assets_root() / "manifest.json").is_file())
     app = QApplication(sys.argv)
     configure_application(app)
-    try: animations = load_animations(assets_root()); logging.info("animation assets loaded")
-    except RuntimeError as exc: logging.exception("asset loading failed"); QMessageBox.critical(None, "Windows Pet", str(exc)); return 1
+    try:
+        character = load_character_with_fallback(None, assets_root())
+        logging.info("character package loaded package_id=%s fallback=%s", character.package.package_id, str(character.fallback_used).lower())
+    except CharacterPackageError:
+        logging.error("character package loading failed")
+        QMessageBox.critical(None, "Windows Pet", "Character assets could not be loaded.")
+        return 1
     audit_sink = JsonlAuditSink(root / "data" / "audit.jsonl")
-    window = PetWindow(animations, root / "data" / "position.json", audit_sink); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.setup_system_tray(); window.show(); logging.info("pet window shown"); app.aboutToQuit.connect(window.input_bubble.close); return app.exec()
+    window = PetWindow(character.package.animations, root / "data" / "position.json", audit_sink); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.setup_system_tray(); window.show(); logging.info("pet window shown"); app.aboutToQuit.connect(window.input_bubble.close); return app.exec()
 
 
 if __name__ == "__main__": raise SystemExit(main())
