@@ -72,6 +72,8 @@ class SafeMarkdownBrowser(QTextBrowser):
     """
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._fit_height_to_contents = False
+        self._resizing_to_contents = False
         self.setReadOnly(True)
         self.setOpenLinks(False)
         self.setOpenExternalLinks(False)
@@ -95,6 +97,26 @@ class SafeMarkdownBrowser(QTextBrowser):
     def set_markdown_text(self, text: str) -> None:
         self.document().setMarkdown(sanitize_markdown(text), QTextDocument.MarkdownDialectGitHub)
         self.document().setDefaultStyleSheet(_MARKDOWN_CSS)
+
+    def fit_height_to_contents(self) -> None:
+        """Let a history card use its outer scroll area for long messages."""
+        self._fit_height_to_contents = True
+        QTimer.singleShot(0, self._update_content_height)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._fit_height_to_contents:
+            self._update_content_height()
+
+    def _update_content_height(self) -> None:
+        if self._resizing_to_contents or not self._fit_height_to_contents:
+            return
+        self._resizing_to_contents = True
+        try:
+            self.document().setTextWidth(max(1, self.viewport().width()))
+            self.setFixedHeight(max(24, int(self.document().size().height()) + 2))
+        finally:
+            self._resizing_to_contents = False
 
 def chat_position(pet_rect: QRect, available: QRect, size=(280, MIN_INPUT_HEIGHT)) -> QPoint:
     width, height = size
@@ -304,12 +326,7 @@ class HistoryWindow(QDialog):
                     text.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
                     text.setStyleSheet('QTextBrowser{color:white; background:transparent; border:0; padding:0;}')
                     text.set_markdown_text(message.get('content', ''))
-                    # The card is capped at 560px, with 16px of card padding.
-                    # Set a document width before asking for its height so the
-                    # outer conversation scroll area, rather than this widget,
-                    # owns long-message scrolling.
-                    text.document().setTextWidth(528)
-                    text.setMinimumHeight(max(24, int(text.document().size().height()) + 2))
+                    text.fit_height_to_contents()
                 else:
                     text = QLabel(); text.setTextFormat(Qt.PlainText); text.setTextInteractionFlags(Qt.TextSelectableByMouse); text.setWordWrap(True); text.setText(message.get('content', '')); text.setMinimumHeight(24); text.setStyleSheet('QLabel{color:white; background:transparent; padding:0;}')
                 text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
