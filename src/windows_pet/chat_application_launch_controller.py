@@ -31,6 +31,7 @@ class ChatApplicationLaunchController(QObject):
         self.launch_worker_factory, self.thread_factory, self.token_factory = launch_worker_factory, thread_factory, token_factory
         self.resolver_thread = self.resolver_worker = self.resolver_token = None
         self.launch_thread = self.launch_worker = self.launch_token = None
+        self._grant_id = None
         self._busy = False
 
     @property
@@ -47,6 +48,8 @@ class ChatApplicationLaunchController(QObject):
     def cancel(self):
         if self.resolver_token is not None: self.resolver_token.cancel()
         if self.launch_token is not None: self.launch_token.cancel()
+        if self._grant_id:
+            self.gate.grants.cancel(self._grant_id)
 
     def shutdown(self):
         self.cancel()
@@ -59,7 +62,10 @@ class ChatApplicationLaunchController(QObject):
     def _cleanup_launch_thread(self, thread):
         if self.launch_thread is thread: self.launch_thread = self.launch_worker = self.launch_token = None
     def _finish(self, text):
-        if self._busy: self._busy = False; self.complete(text)
+        if self._busy:
+            self._busy = False
+            self._grant_id = None
+            self.complete(text)
 
     def _resolved(self, outcome):
         if outcome.status is CandidateResolutionStatus.CANCELLED: self._finish("Application launch was cancelled."); return
@@ -80,6 +86,7 @@ class ChatApplicationLaunchController(QObject):
         if result.grant is None:
             text = "Confirmation expired; please request it again." if result.reason is ConfirmationResultCode.EXPIRED else ("Launch target is not permitted." if result.reason in (ConfirmationResultCode.POLICY_DENIED, ConfirmationResultCode.SESSION_NOT_FOUND, ConfirmationResultCode.SESSION_NOT_PENDING, ConfirmationResultCode.PROPOSAL_MISMATCH, ConfirmationResultCode.FINGERPRINT_MISMATCH) else "Application launch was not started.")
             self._finish(text); return
+        self._grant_id = result.grant.grant_id
         self.launch_token = self.token_factory(); thread = self.launch_thread = self.thread_factory(self)
         worker = self.launch_worker = self.launch_worker_factory(self.executor, result.grant.grant_id, proposal, target, self.launch_token)
         worker.moveToThread(thread); thread.started.connect(worker.run); worker.finished.connect(self._launched); worker.finished.connect(thread.quit)
@@ -87,4 +94,7 @@ class ChatApplicationLaunchController(QObject):
 
     def _launched(self, outcome):
         messages = {ApplicationLaunchStatus.STARTED: "Application was launched.", ApplicationLaunchStatus.HANDED_OFF: "Application launch was handed off.", ApplicationLaunchStatus.CANCELLED: "Application launch was cancelled.", ApplicationLaunchStatus.REJECTED: "Launch target is not permitted.", ApplicationLaunchStatus.FAILED: "Application could not be launched."}
+        if outcome.status is ApplicationLaunchStatus.REJECTED and outcome.result_code == "expired":
+            self._finish("Confirmation expired; please request it again.")
+            return
         self._finish(messages.get(outcome.status, "Application could not be launched."))

@@ -241,7 +241,7 @@ class InputBubble(BubbleFrame):
     pointer_left = Signal()
     focus_state_changed = Signal(bool)
     draft_state_changed = Signal(bool)
-    closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict); api_settings_requested=Signal(); application_launch_requested=Signal(object)
+    closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict); api_settings_requested=Signal(); application_launch_requested=Signal(object); cancel_processing_requested=Signal()
     def __init__(self, pet, worker_factory=AIWorker):
         super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self._pending=False; self._local_action_pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False; self._active_user_text=None; self._retry_text=None; self._last_error_kind=None
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -280,13 +280,22 @@ class InputBubble(BubbleFrame):
     @property
     def cancel_requested(self): return self._cancel_requested
     def _update_primary_button(self):
-        running = self._pending
+        running = self.pending
         waiting = self._thread is not None and self._thread.isRunning()
         self.send_button.setText('■' if running else '➤')
         self.send_button.setToolTip('処理をキャンセル' if running and not self._cancel_requested else ('キャンセルしています…' if self._cancel_requested else '送信'))
         self.send_button.setEnabled((running and not self._cancel_requested) or (not running and not waiting))
     def _on_primary_button_clicked(self):
-        return self.cancel_current_request() if self._pending else self.send_message()
+        if self.pending:
+            if self._cancel_requested:
+                return False
+            if self._local_action_pending:
+                self._cancel_requested = True
+                self._show_response_status('Cancelling…')
+                self._update_primary_button()
+            self.cancel_processing_requested.emit()
+            return True
+        return self.send_message()
     def cancel_current_request(self):
         if not self._pending or self._cancel_requested: return False
         worker = self._worker
@@ -305,7 +314,7 @@ class InputBubble(BubbleFrame):
         if window is not None:
             window.refresh(self.conversation.messages() if refresh_messages else None, pending=self.pending)
     def clear_messages(self):
-        if self._pending:return False
+        if self.pending:return False
         self.conversation.clear()
         self._retry_text=None
         self._refresh_history_window()
@@ -314,10 +323,10 @@ class InputBubble(BubbleFrame):
         pinned = bool(pinned)
         if self.response_pinned == pinned: return
         self.response_pinned = pinned
-        if not pinned and not self._pending and self.response_bubble.isVisible():
+        if not pinned and not self.pending and self.response_bubble.isVisible():
             self._schedule_response_auto_hide()
     def close_response(self):
-        if self._pending: return False
+        if self.pending: return False
         self.response_pinned = False
         self._retry_text = None
         self._last_error_kind = None
@@ -391,7 +400,7 @@ class InputBubble(BubbleFrame):
         self.response_bubble.setText(text)
         self.response_bubble.set_copy_enabled(False); self.response_bubble.set_actions_enabled(False)
         self._position_response()
-        if self._pending:
+        if self.pending:
             self.response_bubble.show()
 
     def _on_search_started(self):
@@ -449,8 +458,13 @@ class InputBubble(BubbleFrame):
         QTimer.singleShot(12000, lambda: self._auto_hide_response(generation))
     def _auto_hide_response(self, generation=None):
         if generation is not None and generation != self._response_generation: return
-        if not self._pending and not self.response_pinned:self.response_bubble.hide()
-    def _thread_done(self): self._thread=None; self._worker=None; self._cancel_requested=False; self._update_primary_button(); self.pet.play('idle')
+        if not self.pending and not self.response_pinned:self.response_bubble.hide()
+    def _thread_done(self):
+        self._thread=None; self._worker=None
+        if not self.pending:
+            self._cancel_requested=False
+            self.pet.play('idle')
+        self._update_primary_button()
     def closeEvent(self,event):
         worker, thread = self._worker, self._thread
         if worker is not None and hasattr(worker, "cancel"): worker.cancel()

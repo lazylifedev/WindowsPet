@@ -46,6 +46,7 @@ class PetWindow(QWidget):
         self.tray_icon = None; self.tray_menu = None
         self.input_bubble.search_completed.connect(self._on_search_completed)
         self.input_bubble.application_launch_requested.connect(self.launch_controller.request)
+        self.input_bubble.cancel_processing_requested.connect(self.cancel_current_processing)
         self.input_bubble.api_settings_requested.connect(self.open_openai_settings)
         self._pet_hovered = False; self._input_hovered = False; self._input_has_focus = False
         self._draft_exists = False; self._api_request_in_progress = False
@@ -217,8 +218,8 @@ class PetWindow(QWidget):
         menu.addAction('PC調査情報', self.show_local_inspection)
         recent = menu.addAction('最近の検索結果', self.show_recent_search)
         recent.setEnabled(self.search_store.latest() is not None)
-        cancel = menu.addAction('処理をキャンセル', self.input_bubble.cancel_current_request)
-        cancel.setEnabled(self.input_bubble.pending and not self.input_bubble.cancel_requested)
+        cancel = menu.addAction('処理をキャンセル', self.cancel_current_processing)
+        cancel.setEnabled((self.input_bubble.pending or self.launch_controller.is_busy) and not self.input_bubble.cancel_requested)
         menu.addSeparator()
         menu.addAction('チャットを開く', self.open_chat)
         menu.addAction('チャットを閉じる', self.close_chat)
@@ -257,11 +258,11 @@ class PetWindow(QWidget):
             self.search_results_window._populate()
         self.search_results_window.show(); self.search_results_window.raise_(); self.search_results_window.activateWindow()
     def cancel_current_processing(self):
-        if self.input_bubble.pending and not self.launch_controller.is_busy:
-            return self.input_bubble.cancel_current_request()
         if self.launch_controller.is_busy:
             self.launch_controller.cancel()
             return True
+        if self.input_bubble.pending:
+            return self.input_bubble.cancel_current_request()
         return False
 
     def closeEvent(self, event):
