@@ -179,10 +179,11 @@ def load_character_package(package_root: Path) -> CharacterPackage:
     if not _text(author, 0, 100) or not _text(license_name, 0, 100):
         _fail(CharacterPackageErrorCode.INVALID_MANIFEST)
     thumbnail = top.get("thumbnail")
+    thumbnail_pixmap = None
     if thumbnail is not None:
         if not isinstance(thumbnail, str):
             _fail(CharacterPackageErrorCode.INVALID_MANIFEST)
-        _png(root, thumbnail)
+        thumbnail_pixmap, _ = _png(root, thumbnail)
     raw_animations = top["animations"]
     if not isinstance(raw_animations, dict) or not raw_animations or len(raw_animations) > MAX_ANIMATIONS:
         _fail(CharacterPackageErrorCode.INVALID_MANIFEST)
@@ -227,7 +228,7 @@ def load_character_package(package_root: Path) -> CharacterPackage:
     for event_id, animation in animations.items():
         if event_id in OPTIONAL_EVENTS and (animation.required or animation.playback is not PlaybackMode.ONCE):
             _fail(CharacterPackageErrorCode.INVALID_PLAYBACK)
-    return CharacterPackage(1, package_id, top["name"], top["version"], author, license_name, thumbnail, root, animations)
+    return CharacterPackage(1, package_id, top["name"], top["version"], author, license_name, thumbnail, root, animations, thumbnail_pixmap)
 
 
 def load_builtin_default_character(legacy_root: Path) -> CharacterPackage:

@@ -37,10 +37,11 @@ def configure_application(app: QApplication) -> QApplication:
 class PetWindow(QWidget):
     DRAG_THRESHOLD = 8
 
-    def __init__(self, animations, position_path: Path, audit_sink=None, quit_callback=None, character_package: CharacterPackage | None = None, selection_path: Path | None = None):
+    def __init__(self, animations, position_path: Path, audit_sink=None, quit_callback=None, character_package: CharacterPackage | None = None, selection_path: Path | None = None, character_selection: CharacterSelection | None = None):
         super().__init__()
         self.animations, self.position_path = animations, position_path
         self.current_character_package = character_package
+        self.current_character_selection = character_selection
         self.selection_path = selection_path
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -98,19 +99,28 @@ class PetWindow(QWidget):
     def apply_character_package(self, package: CharacterPackage) -> bool:
         if not {"idle", "sleep", "thinking", "wave"}.issubset(package.animations): return False
         desired = self.dispatcher.desired_state if self.dispatcher.desired_state in package.animations else "idle"
-        self._stop_frame_timer(); self._animation_generation += 1
-        self.animations, self.current_character_package = package.animations, package
-        self.dispatcher = CharacterRuntimeEventDispatcher(self.animations, self._play_animation_now)
-        self.dispatcher.set_state(desired)
-        icon = QIcon(package.animations["idle"].frames[0].pixmap); self.setWindowIcon(icon)
-        if self.tray_icon is not None: self.tray_icon.setIcon(icon)
-        return True
+        try:
+            self._stop_frame_timer(); self._animation_generation += 1
+            self.animations, self.current_character_package = package.animations, package
+            self.dispatcher = CharacterRuntimeEventDispatcher(self.animations, self._play_animation_now)
+            if not self.dispatcher.set_state(desired): return False
+            icon = QIcon(package.animations["idle"].frames[0].pixmap); self.setWindowIcon(icon)
+            if self.tray_icon is not None: self.tray_icon.setIcon(icon)
+            return True
+        except Exception:
+            return False
 
     def select_character(self, package: CharacterPackage, selection: CharacterSelection) -> bool:
+        if selection.source not in {"builtin", "working", "installed"} or (selection.package_id, selection.version) != (package.package_id, package.version): return False
+        previous_package, previous_selection = self.current_character_package, self.current_character_selection
         if not self.apply_character_package(package): return False
         try:
             if self.selection_path is not None: save_selection(self.selection_path, selection)
-        except OSError: return False
+        except OSError:
+            if previous_package is not None: self.apply_character_package(previous_package)
+            self.current_character_selection = previous_selection
+            return False
+        self.current_character_selection = selection
         return True
 
     def _stop_frame_timer(self):
@@ -305,6 +315,7 @@ class PetWindow(QWidget):
 
     def _build_context_menu(self):
         menu = QMenu(self)
+        menu.addAction("キャラクター選択", self.open_character_manager)
         menu.addAction("キャラクター設定", self.open_character_editor)
         menu.addAction('OpenAI API 設定', self.open_openai_settings)
         menu.addAction('ファイル検索設定', self.open_file_search_settings)
@@ -377,6 +388,7 @@ class PetWindow(QWidget):
         self.launch_controller.shutdown()
         self.input_bubble.close()
         if self.character_editor_window is not None: self.character_editor_window.shutdown()
+        if getattr(self, "character_manager_window", None) is not None: self.character_manager_window.close()
         if self.openai_settings_window is not None: self.openai_settings_window.shutdown()
         if self.help_window is not None: self.help_window.close()
         if self.local_inspection_window is not None: self.local_inspection_window.shutdown()
@@ -399,7 +411,7 @@ def main() -> int:
         QMessageBox.critical(None, "Windows Pet", "Character assets could not be loaded.")
         return 1
     audit_sink = JsonlAuditSink(root / "data" / "audit.jsonl")
-    window = PetWindow(character.package.animations, root / "data" / "position.json", audit_sink, character_package=character.package, selection_path=character_selection_path(data_root)); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.setup_system_tray(); window.show(); logging.info("pet window shown"); app.aboutToQuit.connect(window.input_bubble.close); return app.exec()
+    window = PetWindow(character.package.animations, root / "data" / "position.json", audit_sink, character_package=character.package, selection_path=character_selection_path(data_root), character_selection=selection); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.setup_system_tray(); window.show(); logging.info("pet window shown"); app.aboutToQuit.connect(window.input_bubble.close); return app.exec()
 
 
 if __name__ == "__main__": raise SystemExit(main())

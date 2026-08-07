@@ -56,8 +56,13 @@ def resolve_selection(selection_path: Path, working_root: Path, installed_root: 
     selected = read_selection(selection_path)
     builtin = lambda: load_builtin_default_character(builtin_root)
     try:
-        if selected is None or selected.source == "builtin":
-            package = builtin(); return package, CharacterSelection("builtin", package.package_id, package.version), selected is not None
+        if selected is None:
+            package = builtin(); return package, CharacterSelection("builtin", package.package_id, package.version), False
+        if selected.source == "builtin":
+            package = builtin()
+            if (selected.package_id, selected.version) != (package.package_id, package.version):
+                raise ValueError("invalid builtin selection")
+            return package, selected, False
         root = Path(working_root) if selected.source == "working" else Path(installed_root) / selected.package_id
         if selected.source == "installed" and (root.name != selected.package_id or root.is_symlink()): raise ValueError("invalid installed root")
         package = load_character_package(root)
@@ -82,7 +87,7 @@ def _safe_member(info: zipfile.ZipInfo) -> PurePosixPath:
     return path
 
 
-def import_wpet(archive: Path, installed_root: Path) -> CharacterPackage:
+def _prepare_wpet(archive: Path, installed_root: Path) -> tuple[Path, CharacterPackage]:
     archive = Path(archive)
     if archive.suffix.lower() != ".wpet": raise ValueError("expected .wpet")
     temporary = Path(installed_root).parent / f".import-{uuid4().hex}"
@@ -100,18 +105,44 @@ def import_wpet(archive: Path, installed_root: Path) -> CharacterPackage:
             for info in infos:
                 target = temporary.joinpath(*_safe_member(info).parts); target.parent.mkdir(parents=True, exist_ok=True)
                 with package_zip.open(info) as source, target.open("wb") as output: shutil.copyfileobj(source, output)
-        candidate = load_character_package(temporary)
-        destination = Path(installed_root) / candidate.package_id; destination.parent.mkdir(parents=True, exist_ok=True)
-        backup = destination.with_name(f".backup-{uuid4().hex}")
-        if destination.exists(): os.replace(destination, backup)
-        try: os.replace(temporary, destination)
-        except OSError:
+        return temporary, load_character_package(temporary)
+    except Exception:
+        if temporary.exists(): shutil.rmtree(temporary)
+        raise
+
+
+def inspect_wpet(archive: Path, installed_root: Path) -> CharacterPackage:
+    temporary, package = _prepare_wpet(archive, installed_root)
+    try:
+        return package
+    finally:
+        if temporary.exists(): shutil.rmtree(temporary)
+
+
+def import_wpet(archive: Path, installed_root: Path, *, replace_existing: bool = False) -> CharacterPackage:
+    temporary, candidate = _prepare_wpet(archive, installed_root)
+    destination = Path(installed_root) / candidate.package_id
+    backup = destination.with_name(f".backup-{uuid4().hex}")
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            if not replace_existing:
+                raise FileExistsError("character package already installed")
+            if destination.is_symlink() or not destination.is_dir() or destination.name != candidate.package_id:
+                raise ValueError("unsafe installed destination")
+            os.replace(destination, backup)
+        try:
+            os.replace(temporary, destination)
+            installed = load_character_package(destination)
+        except Exception:
+            if destination.exists(): shutil.rmtree(destination)
             if backup.exists(): os.replace(backup, destination)
             raise
         if backup.exists(): shutil.rmtree(backup)
-        return load_character_package(destination)
+        return installed
     finally:
         if temporary.exists(): shutil.rmtree(temporary)
+        if backup.exists() and destination.exists(): shutil.rmtree(backup)
 
 
 def export_wpet(package: CharacterPackage, destination: Path) -> None:

@@ -41,6 +41,7 @@ class CharacterPackage:
     thumbnail: str | None
     package_root: Path
     animations: Mapping[str, CharacterAnimation]
+    thumbnail_pixmap: QPixmap | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "animations", MappingProxyType(dict(self.animations)))
