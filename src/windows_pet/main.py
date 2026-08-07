@@ -8,8 +8,10 @@ from PySide6.QtWidgets import QApplication, QLabel, QMenu, QMessageBox, QWidget,
 
 from .character_models import CharacterPackageError
 from .character_package_loader import load_character_with_fallback
+from .character_models import CharacterPackage
+from .character_selection import CharacterSelection, resolve_selection, save_selection
 from .chat_bubble import InputBubble, chat_position, response_position
-from .paths import application_root, assets_root, character_working_root
+from .paths import application_root, assets_root, character_data_root, character_installed_root, character_selection_path, character_working_root
 from .character_editor_window import CharacterEditorWindow
 from .storage import constrain_to_primary, load_position, save_position
 from .file_search_settings_window import FileSearchSettingsWindow
@@ -35,9 +37,11 @@ def configure_application(app: QApplication) -> QApplication:
 class PetWindow(QWidget):
     DRAG_THRESHOLD = 8
 
-    def __init__(self, animations, position_path: Path, audit_sink=None, quit_callback=None):
+    def __init__(self, animations, position_path: Path, audit_sink=None, quit_callback=None, character_package: CharacterPackage | None = None, selection_path: Path | None = None):
         super().__init__()
         self.animations, self.position_path = animations, position_path
+        self.current_character_package = character_package
+        self.selection_path = selection_path
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.label = QLabel(self); self.label.setAttribute(Qt.WA_TranslucentBackground); self.label.setScaledContents(True)
@@ -91,6 +95,24 @@ class PetWindow(QWidget):
         if name != "sleep" and not self.input_bubble.isVisible() and not self.input_bubble.pending: self._last_activity.start(30000)
 
     def _show_frame(self): self.label.setPixmap(self._animation.frames[self._frame].pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    def apply_character_package(self, package: CharacterPackage) -> bool:
+        if not {"idle", "sleep", "thinking", "wave"}.issubset(package.animations): return False
+        desired = self.dispatcher.desired_state if self.dispatcher.desired_state in package.animations else "idle"
+        self._stop_frame_timer(); self._animation_generation += 1
+        self.animations, self.current_character_package = package.animations, package
+        self.dispatcher = CharacterRuntimeEventDispatcher(self.animations, self._play_animation_now)
+        self.dispatcher.set_state(desired)
+        icon = QIcon(package.animations["idle"].frames[0].pixmap); self.setWindowIcon(icon)
+        if self.tray_icon is not None: self.tray_icon.setIcon(icon)
+        return True
+
+    def select_character(self, package: CharacterPackage, selection: CharacterSelection) -> bool:
+        if not self.apply_character_package(package): return False
+        try:
+            if self.selection_path is not None: save_selection(self.selection_path, selection)
+        except OSError: return False
+        return True
+
     def _stop_frame_timer(self):
         self._timer.stop()
         if self._frame_timeout_callback is not None:
@@ -312,6 +334,11 @@ class PetWindow(QWidget):
             builtin = load_character_with_fallback(None, assets_root()).package
             self.character_editor_window = CharacterEditorWindow(builtin, character_working_root(), None)
         self.character_editor_window.show(); self.character_editor_window.raise_(); self.character_editor_window.activateWindow()
+    def open_character_manager(self):
+        from .character_manager_window import CharacterManagerWindow
+        if not hasattr(self, "character_manager_window") or self.character_manager_window is None:
+            self.character_manager_window = CharacterManagerWindow(self, character_data_root(), assets_root())
+        self.character_manager_window.refresh(); self.character_manager_window.show(); self.character_manager_window.raise_(); self.character_manager_window.activateWindow()
     def show_help(self):
         if self.help_window is None: self.help_window = HelpWindow(self)
         self.help_window.show(); self.help_window.raise_(); self.help_window.activateWindow()
@@ -362,14 +389,16 @@ def main() -> int:
     app = QApplication(sys.argv)
     configure_application(app)
     try:
-        character = load_character_with_fallback(None, assets_root())
+        data_root = character_data_root()
+        package, selection, fallback = resolve_selection(character_selection_path(data_root), character_working_root(data_root), character_installed_root(data_root), assets_root())
+        character = type("SelectedCharacter", (), {"package": package, "fallback_used": fallback})()
         logging.info("character package loaded package_id=%s fallback=%s", character.package.package_id, str(character.fallback_used).lower())
     except CharacterPackageError:
         logging.error("character package loading failed")
         QMessageBox.critical(None, "Windows Pet", "Character assets could not be loaded.")
         return 1
     audit_sink = JsonlAuditSink(root / "data" / "audit.jsonl")
-    window = PetWindow(character.package.animations, root / "data" / "position.json", audit_sink); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.setup_system_tray(); window.show(); logging.info("pet window shown"); app.aboutToQuit.connect(window.input_bubble.close); return app.exec()
+    window = PetWindow(character.package.animations, root / "data" / "position.json", audit_sink, character_package=character.package, selection_path=character_selection_path(data_root)); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.setup_system_tray(); window.show(); logging.info("pet window shown"); app.aboutToQuit.connect(window.input_bubble.close); return app.exec()
 
 
 if __name__ == "__main__": raise SystemExit(main())

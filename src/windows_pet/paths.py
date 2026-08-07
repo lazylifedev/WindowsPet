@@ -34,3 +34,11 @@ def character_data_root() -> Path:
 def character_working_root(data_root: Path | None = None) -> Path:
     """Return the editor working package location (inject ``data_root`` in tests)."""
     return (Path(data_root) if data_root is not None else character_data_root()) / "working"
+
+
+def character_installed_root(data_root: Path | None = None) -> Path:
+    return (Path(data_root) if data_root is not None else character_data_root()) / "installed"
+
+
+def character_selection_path(data_root: Path | None = None) -> Path:
+    return (Path(data_root) if data_root is not None else character_data_root()) / "selection.json"
