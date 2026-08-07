@@ -5,7 +5,9 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QFrame, QMessageBox, QPushButton, QSizePolicy
 
 from windows_pet.character_editor_model import EditableCharacter
-from windows_pet.character_editor_window import CharacterEditorWindow
+from windows_pet.character_editor_window import (FRAME_MIME, CharacterEditorWindow,
+                                                  calculate_insert_index, move_frame,
+                                                  natural_filename_key, validate_batch_capacity)
 from windows_pet.character_package_loader import load_builtin_default_character, load_character_package
 from windows_pet.character_working_package import create_working_from_builtin, save_working_package, validate_png
 
@@ -153,4 +155,51 @@ def test_editor_add_and_delete_controls_preserve_frame_limits(tmp_path, qapp):
     animation.frames = animation.frames[:2]; editor._render()
     delete = next(button for button in editor._rows[0].findChildren(QPushButton) if button.accessibleName() == "フレームを削除")
     assert not delete.isEnabled()
+    editor.close()
+
+
+def test_reorder_helpers_preserve_identity_and_ignore_same_slot(tmp_path, qapp):
+    editor = CharacterEditorWindow(load_builtin_default_character(Path("assets/animations")), tmp_path / "working")
+    frames = editor.model.animations[0].frames
+    original = list(frames)
+    assert calculate_insert_index([10, 30, 50], 30) == 2
+    assert move_frame(frames, 2, 0)
+    assert frames == [original[2], original[0], original[1], original[3]]
+    assert not move_frame(frames, 1, 2)
+    assert not editor.dirty
+    editor.close()
+
+
+def test_external_batch_is_naturally_sorted_and_all_or_nothing(tmp_path, qapp, monkeypatch):
+    editor = CharacterEditorWindow(load_builtin_default_character(Path("assets/animations")), tmp_path / "working")
+    sources = []
+    for name in ("frame_10.png", "frame_2.png", "frame_1.png"):
+        path = tmp_path / name; _png(path); sources.append(path)
+    animation = editor.model.animations[0]
+    before = list(animation.frames)
+    assert editor.add_external_frames(animation, sources, 1)
+    assert [frame.source_path.name for frame in animation.frames[1:4]] != [path.name for path in sources]
+    assert len(animation.frames) == len(before) + 3 and editor.dirty
+    editor._set_dirty(False)
+    invalid = tmp_path / "not-image.png"; invalid.write_bytes(b"nope")
+    before = list(animation.frames)
+    monkeypatch.setattr("windows_pet.character_editor_window.QMessageBox.warning", lambda *args: None)
+    assert not editor.add_external_frames(animation, [sources[0], invalid], 0)
+    assert animation.frames == before and not editor.dirty
+    editor.close()
+
+
+def test_drag_payload_is_session_and_event_bound(tmp_path, qapp):
+    editor = CharacterEditorWindow(load_builtin_default_character(Path("assets/animations")), tmp_path / "working")
+    strip = editor._frame_scroll_areas[0]
+    frame = editor.model.animations[0].frames[0]
+    from PySide6.QtCore import QMimeData
+    import json
+    mime = QMimeData()
+    mime.setData(FRAME_MIME, json.dumps({"session": editor.session_token, "eventId": "idle", "frameId": frame.frame_id}).encode())
+    assert strip._valid_internal(mime) is frame
+    mime.setData(FRAME_MIME, json.dumps({"session": editor.session_token, "eventId": "sleep", "frameId": frame.frame_id}).encode())
+    assert strip._valid_internal(mime) is None
+    assert validate_batch_capacity(8, 2) and not validate_batch_capacity(8, 3)
+    assert sorted([Path("frame_10.png"), Path("frame_2.png"), Path("frame_1.png")], key=natural_filename_key) == [Path("frame_1.png"), Path("frame_2.png"), Path("frame_10.png")]
     editor.close()
