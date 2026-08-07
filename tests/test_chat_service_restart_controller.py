@@ -1,9 +1,11 @@
 from threading import Event, get_ident
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, QThread
 
 from windows_pet.action_models import ConfirmationDecision, ConfirmationResponse
-from windows_pet.chat_service_restart_controller import ChatServiceRestartController
+from windows_pet.chat_service_restart_controller import (ChatServiceRestartController,
+                                                          ServiceRestartExecutionThread,
+                                                          ServiceRestartResolutionThread)
 from windows_pet.service_restart import (ServiceIdentity, ServiceResolutionCode,
                                          ServiceRestartOutcome, ServiceRestartStatus)
 from windows_pet.service_restart_request import ServiceRestartRequest
@@ -40,6 +42,53 @@ def test_service_controller_resolves_snapshot_off_gui_thread_and_cancelled_confi
     qtbot.waitUntil(lambda: controller.resolution_thread is None, timeout=3000)
     assert resolver.thread_id != get_ident() and not controller.is_busy
     controller.shutdown()
+
+
+def test_service_controller_validates_against_the_inspection_snapshot():
+    class SnapshotOnlyResolver(Resolver):
+        def __init__(self):
+            super().__init__()
+            self.live_inspection_used = False
+
+        def validate(self, identity, snapshot=None):
+            if snapshot is None:
+                self.live_inspection_used = True
+                return ServiceResolutionCode.NOT_FOUND
+            return super().validate(identity, snapshot)
+
+    resolver = SnapshotOnlyResolver()
+    results = []
+    thread = ServiceRestartResolutionThread(resolver, ServiceRestartRequest("Spooler", SNAPSHOT), Event())
+    thread.result_ready.connect(lambda identity, code: results.append((identity, code)))
+    thread.run()
+    assert resolver.live_inspection_used is False
+    assert results[0][1] is ServiceResolutionCode.MATCHED
+
+
+def test_service_restart_uses_qthread_subclasses_without_qobject_workers(qapp, qtbot):
+    done, resolver = [], Resolver()
+    controller = ChatServiceRestartController(done.append, resolver=resolver, dialog_factory=RejectDialog)
+    assert controller.request(ServiceRestartRequest("Spooler", SNAPSHOT))
+    qtbot.waitUntil(lambda: bool(done), timeout=3000)
+    qtbot.waitUntil(lambda: controller.resolution_thread is None, timeout=3000)
+    assert controller.resolution_thread is None
+    assert controller.execution_thread is None
+    controller.shutdown()
+
+
+def test_service_restart_execution_thread_emits_result_from_run():
+    class Executor:
+        def execute(self, *_args):
+            return ServiceRestartOutcome(ServiceRestartStatus.CANCELLED, "cancelled")
+
+    results = []
+    thread = ServiceRestartExecutionThread(
+        Executor(), "grant", object(), object(), Event()
+    )
+    assert isinstance(thread, QThread)
+    thread.result_ready.connect(results.append)
+    thread.run()
+    assert results[0].status is ServiceRestartStatus.CANCELLED
 
 
 def test_service_controller_rejects_protected_before_confirmation(qapp, qtbot):
@@ -83,3 +132,72 @@ def test_service_controller_cancel_and_shutdown_are_cooperative(qapp, qtbot):
     qtbot.waitUntil(lambda: controller.resolution_thread is not None and controller.resolution_thread.isRunning(), timeout=3000)
     controller.shutdown()
     qtbot.waitUntil(lambda: not controller.is_busy, timeout=3000)
+
+
+def test_service_restart_controller_stress_100_requests_same_qapplication(qapp, qtbot):
+    for _ in range(100):
+        done = []
+        controller = ChatServiceRestartController(
+            done.append, resolver=Resolver(), dialog_factory=RejectDialog
+        )
+        assert controller.request(ServiceRestartRequest("Spooler", SNAPSHOT))
+        qtbot.waitUntil(lambda: bool(done), timeout=3000)
+        qtbot.waitUntil(lambda: controller.resolution_thread is None, timeout=3000)
+        controller.shutdown()
+
+
+def test_service_restart_controller_create_destroy_stress_100(qapp, qtbot):
+    for _ in range(100):
+        done = []
+        controller = ChatServiceRestartController(
+            done.append, resolver=Resolver(), dialog_factory=RejectDialog
+        )
+        assert controller.request(ServiceRestartRequest("Spooler", SNAPSHOT))
+        controller.shutdown()
+        qtbot.waitUntil(lambda: controller.resolution_thread is None, timeout=3000)
+        assert not controller.is_busy
+
+
+def test_service_restart_controller_cancel_stress_50(qapp, qtbot):
+    for _ in range(50):
+        started, release, done = Event(), Event(), []
+
+        class BlockingResolver(Resolver):
+            def resolve(self, query, snapshot=None):
+                started.set()
+                release.wait(30)
+                return super().resolve(query, snapshot)
+
+        controller = ChatServiceRestartController(
+            done.append, resolver=BlockingResolver(), dialog_factory=RejectDialog
+        )
+        assert controller.request(ServiceRestartRequest("Spooler", SNAPSHOT))
+        qtbot.waitUntil(started.is_set, timeout=3000)
+        controller.cancel()
+        release.set()
+        qtbot.waitUntil(lambda: bool(done), timeout=3000)
+        qtbot.waitUntil(lambda: controller.resolution_thread is None, timeout=3000)
+        controller.shutdown()
+
+
+def test_service_restart_controller_shutdown_stress_50(qapp, qtbot):
+    for _ in range(50):
+        done = []
+        class CooperativeResolver(Resolver):
+            def __init__(self):
+                super().__init__()
+                self.cancel_event = None
+
+            def resolve(self, query, snapshot=None):
+                self.cancel_event.wait(30)
+                return super().resolve(query, snapshot)
+
+        resolver = CooperativeResolver()
+        controller = ChatServiceRestartController(
+            done.append, resolver=resolver, dialog_factory=RejectDialog
+        )
+        resolver.cancel_event = controller._cancel
+        assert controller.request(ServiceRestartRequest("Spooler", SNAPSHOT))
+        controller.shutdown()
+        qtbot.waitUntil(lambda: controller.resolution_thread is None, timeout=3000)
+        assert not controller.is_busy
