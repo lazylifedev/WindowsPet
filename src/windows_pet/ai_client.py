@@ -13,6 +13,7 @@ from .tool_dispatcher import ToolDispatcher
 from .openai_credentials import get_api_key
 from .application_launch_request import parse_application_launch_request
 from .process_stop_request import parse_process_stop_request
+from .service_restart_request import parse_service_restart_request
 from .powershell_read_runner import PowerShellReadRunner
 from .process_inspection import normalize_process_query, resolve_process_candidate
 
@@ -23,6 +24,8 @@ INSTRUCTIONS = """Respond in Japanese, politely and concisely. WindowsPet can us
 Use inspect_windows for read-only process, service, or network inspection. A user request such as 「メモ帳を終了して」「メモ帳を閉じて」「Notepadを終了して」or「このプロセスを終了して」is a request to stop an application/process, not a request for manual instructions. For such a request, inspect_windows(processes) when needed, then continue the same request with request_process_stop only when the inspection result contains exactly one matching process and its returned PID and name can be used. Never guess a PID or choose among ambiguous candidates; ask the user to clarify instead. 「閉じる」may mean process termination in this context, but treat file/window-only wording as ambiguous and ask for clarification.
 
 request_process_stop only hands the request to WindowsPet's local safety flow. The Tool call itself never stops a process. WindowsPet locally re-resolves the process, validates identity, rejects protected processes, shows SCRIPT_REVIEW confirmation, issues a one-shot ExecutionGrant only after approval, runs only the approved fixed PowerShell operation, and performs read-only verification afterward. Do not claim that the process was stopped before that flow completes.
+
+For a Windows service restart request, first use inspect_windows(services). Call request_service_restart only with a service name or display name returned by that inspection. This hands off only to the local confirmation flow; it never restarts a service itself. WindowsPet binds the inspection snapshot, re-resolves the canonical service identity, rejects protected services and missing administrator rights, requires SCRIPT_REVIEW approval, then performs the fixed operation and verifies the service is Running.
 
 Do not generate or execute PowerShell, shell commands, generic computer-control actions, or arbitrary scripts. Do not tell the user that WindowsPet is inherently unable to stop processes or immediately fall back to Task Manager/manual instructions when request_process_stop is available. Use a safety/policy explanation only when the tool is unavailable, the target is ambiguous, or local validation/policy rejects it.
 
@@ -95,9 +98,9 @@ class AIClient:
         except Exception as exc:
             raise classify_openai_error(exc) from exc
 
-    def stream_with_tools(self, history, on_delta, on_search_started=None, on_search_completed=None, cancel=None, on_application_launch_requested=None, on_powershell_started=None, on_powershell_completed=None, on_process_stop_requested=None) -> str:
+    def stream_with_tools(self, history, on_delta, on_search_started=None, on_search_completed=None, cancel=None, on_application_launch_requested=None, on_powershell_started=None, on_powershell_completed=None, on_process_stop_requested=None, on_service_restart_requested=None) -> str:
         """Run the public Responses API tool loop; full paths never enter API input."""
-        seen=set(); failed_inspections=set(); inspected_processes={}; inspection_snapshots={}; inputs=list(history); dispatcher=ToolDispatcher(); calls=0
+        seen=set(); failed_inspections=set(); inspected_processes={}; service_snapshot=(); inputs=list(history); dispatcher=ToolDispatcher(); calls=0
         try:
             while calls < 3:
                 self._raise_if_cancelled(cancel)
@@ -130,6 +133,17 @@ class AIClient:
                         raise AIClientError("tool", "process_identity_not_from_inspection")
                     if on_process_stop_requested: on_process_stop_requested(request)
                     return APPLICATION_LAUNCH_HANDOFF
+                if name == "request_service_restart":
+                    if not call_id or call_id in seen or len(calls_found) != 1: raise AIClientError("tool", "unsupported_tool")
+                    try: request = parse_service_restart_request(getattr(call, "arguments", ""))
+                    except ValueError as exc: raise AIClientError("tool", "invalid_service_restart_request") from exc
+                    # Bind the handoff to the exact read-only service snapshot
+                    # returned in this chat turn; the controller revalidates it.
+                    if not service_snapshot:
+                        raise AIClientError("tool", "service_snapshot_not_available")
+                    request = request.__class__(request.service_query, service_snapshot)
+                    if on_service_restart_requested: on_service_restart_requested(request)
+                    return APPLICATION_LAUNCH_HANDOFF
                 if name == "inspect_windows":
                     if not call_id or call_id in seen or len(calls_found) != 1: raise AIClientError("tool", "unsupported_tool")
                     try: request = dispatcher.parse_windows_inspection(getattr(call, "arguments", ""))
@@ -154,6 +168,8 @@ class AIClient:
                         safe["inspection_reason"] = reason
                         if candidate is not None:
                             safe["candidate"] = {"process_id": candidate[0], "canonical_process_name": candidate[1]}
+                    if request.area.value == "services" and outcome.status.value == "success":
+                        service_snapshot = tuple(dict(item) for item in safe.get("items", ()))
                     if outcome.result_code in {"invalid_output", "not_available", "execution_failed", "timeout", "output_limit_exceeded", "child_cleanup_failed"}: failed_inspections.add(signature)
                     if on_powershell_completed: on_powershell_completed(safe)
                     inputs.extend(getattr(response, "output", [])); inputs.append({"type":"function_call_output","call_id":call_id,"output":json.dumps(safe, ensure_ascii=False)})
@@ -184,7 +200,10 @@ class AIClient:
         return {"type":"function","name":"request_process_stop","description":"inspect_windows(processes) で確認済みの 1 件のプロセスについて、終了確認を依頼します。このTool callだけでは終了しません。","parameters":{"type":"object","properties":{"process_id":{"type":"integer","minimum":1},"expected_process_name":{"type":"string","minLength":1,"maxLength":260}},"required":["process_id","expected_process_name"],"additionalProperties":False},"strict":True}
 
     def _tools(self):
-        return self._base_tools() + [self._stop_process_tool()]
+        return self._base_tools() + [self._stop_process_tool(), self._service_restart_tool()]
+
+    def _service_restart_tool(self):
+        return {"type":"function","name":"request_service_restart","description":"inspect_windows(services)で確認済みのWindowsサービス再起動について確認を依頼します。このTool callだけでは再起動しません。","parameters":{"type":"object","properties":{"service_query":{"type":"string","minLength":1,"maxLength":260}},"required":["service_query"],"additionalProperties":False},"strict":True}
 
     def _base_tools(self):
         return [{"type":"function","name":"search_files","description":"許可済みフォルダーを読み取り専用で検索します。ファイル本文は検索しません。","parameters":{"type":"object","properties":{"query":{"type":"string"},"root_ids":{"type":"array","items":{"type":"string"}},"extensions":{"type":"array","items":{"type":"string"}},"modified_after":{"type":["string","null"]},"modified_before":{"type":["string","null"]},"min_size_bytes":{"type":["integer","null"]},"max_size_bytes":{"type":["integer","null"]},"include_directories":{"type":"boolean"},"max_results":{"type":"integer"}},"required":["query","root_ids","extensions","modified_after","modified_before","min_size_bytes","max_size_bytes","include_directories","max_results"],"additionalProperties":False},"strict":True}, {"type":"function","name":"inspect_windows","description":"PowerShellを使用して現在のWindows状態を読み取り専用で調査します。構成変更は行いません。","parameters":{"type":"object","properties":{"area":{"type":"string","enum":["processes","services","network"]},"query":{"type":["string","null"],"maxLength":100},"max_results":{"type":"integer","minimum":1,"maximum":100}},"required":["area","query","max_results"],"additionalProperties":False},"strict":True}]

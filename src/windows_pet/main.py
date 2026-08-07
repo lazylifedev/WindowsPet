@@ -23,6 +23,7 @@ from .local_inspection_window import LocalInspectionWindow
 from .audit_log import JsonlAuditSink
 from .chat_application_launch_controller import ChatApplicationLaunchController
 from .chat_process_stop_controller import ChatProcessStopController
+from .chat_service_restart_controller import ChatServiceRestartController
 from .ai_worker import AIWorker
 from .character_runtime_events import CharacterRuntimeEventDispatcher
 
@@ -61,6 +62,7 @@ class PetWindow(QWidget):
         self.input_bubble = InputBubble(self, worker_factory=lambda history: AIWorker(history, audit=self.audit_sink))
         self.launch_controller = ChatApplicationLaunchController(self.input_bubble.complete_local_action, self, self.audit_sink, show_status=self.input_bubble.show_local_action_status)
         self.process_stop_controller = ChatProcessStopController(self.input_bubble.complete_local_action, self, self.audit_sink)
+        self.service_restart_controller = ChatServiceRestartController(self.input_bubble.complete_local_action, self, self.audit_sink)
         self.search_store = SearchResultStore()
         self.search_settings_window = None
         self.search_results_window = None
@@ -74,6 +76,7 @@ class PetWindow(QWidget):
         self.input_bubble.search_completed.connect(self._on_search_completed)
         self.input_bubble.application_launch_ready.connect(self.launch_controller.request)
         self.input_bubble.process_stop_ready.connect(self.process_stop_controller.request)
+        self.input_bubble.service_restart_ready.connect(self.service_restart_controller.request)
         self.input_bubble.cancel_processing_requested.connect(self.cancel_current_processing)
         self.input_bubble.api_settings_requested.connect(self.open_openai_settings)
         self._pet_hovered = False; self._input_hovered = False; self._input_has_focus = False
@@ -326,7 +329,7 @@ class PetWindow(QWidget):
         recent = menu.addAction('最近の検索結果', self.show_recent_search)
         recent.setEnabled(self.search_store.latest() is not None)
         cancel = menu.addAction('処理をキャンセル', self.cancel_current_processing)
-        cancel.setEnabled((self.input_bubble.pending or self.launch_controller.is_busy or self.process_stop_controller.is_busy) and not self.input_bubble.cancel_requested)
+        cancel.setEnabled((self.input_bubble.pending or self.launch_controller.is_busy or self.process_stop_controller.is_busy or self.service_restart_controller.is_busy) and not self.input_bubble.cancel_requested)
         menu.addSeparator()
         menu.addAction('チャットを開く', self.open_chat)
         menu.addAction('チャットを閉じる', self.close_chat)
@@ -375,6 +378,9 @@ class PetWindow(QWidget):
             self.search_results_window._populate()
         self.search_results_window.show(); self.search_results_window.raise_(); self.search_results_window.activateWindow()
     def cancel_current_processing(self):
+        if self.service_restart_controller.is_busy:
+            self.service_restart_controller.cancel()
+            return True
         if self.process_stop_controller.is_busy:
             self.process_stop_controller.cancel()
             return True
@@ -392,6 +398,7 @@ class PetWindow(QWidget):
         self._shutdown_complete = True
         self._hover_timer.stop(); self._stop_frame_timer()
         self.process_stop_controller.shutdown()
+        self.service_restart_controller.shutdown()
         self.launch_controller.shutdown()
         self.input_bubble.close()
         if self.character_editor_window is not None: self.character_editor_window.shutdown()
