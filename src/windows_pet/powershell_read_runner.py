@@ -38,18 +38,48 @@ class PowerShellReadRunner:
 
     def _executable(self) -> Path | None:
         try:
-            root = Path(self.windows_directory_resolver()).resolve(strict=True)
-            executable = (root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe").resolve(strict=True)
-            # resolve() must remain within the OS directory, and no link/reparse point is trusted.
-            if executable.parent != (root / "System32" / "WindowsPowerShell" / "v1.0").resolve(strict=True):
+            windows_directory = Path(self.windows_directory_resolver())
+            raw_root = str(windows_directory)
+            if raw_root.startswith(("\\\\", "\\\\?\\", "\\\\.\\")):
                 return None
-            if not executable.is_file() or executable.is_symlink() or os.path.islink(executable):
+            parts = (windows_directory, windows_directory / "System32",
+                     windows_directory / "System32" / "WindowsPowerShell",
+                     windows_directory / "System32" / "WindowsPowerShell" / "v1.0")
+            executable = parts[-1] / "powershell.exe"
+            if (not windows_directory.is_dir() or
+                    any(self._is_link_or_reparse(path) for path in (*parts, executable)) or
+                    not executable.is_file()):
                 return None
-            if os.name == "nt" and os.stat(executable).st_file_attributes & 0x400:
+            root = windows_directory.resolve(strict=True)
+            resolved_executable = executable.resolve(strict=True)
+            if os.path.commonpath((os.path.normcase(str(root)), os.path.normcase(str(resolved_executable)))) != os.path.normcase(str(root)):
                 return None
-            return executable
-        except (OSError, RuntimeError):
+            return resolved_executable
+        except (OSError, RuntimeError, ValueError):
             return None
+
+    @staticmethod
+    def _is_link_or_reparse(path: Path) -> bool:
+        attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+        return path.is_symlink() or os.path.islink(path) or bool(attributes & 0x400)
+
+    @staticmethod
+    def _terminate_owned_process(process, timeout_seconds: float = 2.0) -> bool:
+        """Boundedly reap a PowerShell process created by this runner."""
+        try:
+            if process.poll() is None:
+                process.terminate()
+            try:
+                process.communicate(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                try:
+                    process.communicate(timeout=timeout_seconds)
+                except subprocess.TimeoutExpired:
+                    return False
+            return True
+        except (OSError, subprocess.SubprocessError):
+            return False
 
     def _invalid_plan(self, request, plan) -> bool:
         return (plan.operation != request.area.value or
@@ -81,22 +111,25 @@ class PowerShellReadRunner:
         try:
             process = self.process_factory(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False,
                                            cwd=str(executable.parent), env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            def stopped(event, status, result_code):
+                if not self._terminate_owned_process(process):
+                    emit("powershell_read_failed", result_code="child_cleanup_failed")
+                    return PowerShellReadOutcome(PowerShellReadStatus.FAILED, result_code="child_cleanup_failed")
+                emit(event, result_code=result_code)
+                return PowerShellReadOutcome(status, result_code=result_code)
             started, payload = self.clock(), plan.script.encode("utf-8")
             while True:
                 if cancel is not None and cancel.is_set():
-                    process.terminate(); process.communicate(); emit("powershell_read_cancelled", result_code="cancelled")
-                    return PowerShellReadOutcome(PowerShellReadStatus.CANCELLED, result_code="cancelled")
+                    return stopped("powershell_read_cancelled", PowerShellReadStatus.CANCELLED, "cancelled")
                 remaining = plan.timeout_seconds - (self.clock() - started)
                 if remaining <= 0:
-                    process.terminate(); process.communicate(); emit("powershell_read_timeout", result_code="timeout")
-                    return PowerShellReadOutcome(PowerShellReadStatus.TIMEOUT, result_code="timeout")
+                    return stopped("powershell_read_timeout", PowerShellReadStatus.TIMEOUT, "timeout")
                 try:
                     stdout, stderr = process.communicate(payload, timeout=min(0.1, remaining)); break
                 except subprocess.TimeoutExpired as exc:
                     # communicate() returns partial bytes on TimeoutExpired; terminate before buffering can grow unbounded.
                     if len(exc.output or b"") > plan.max_stdout_bytes or len(exc.stderr or b"") > plan.max_stderr_bytes:
-                        process.terminate(); process.communicate(); emit("powershell_read_failed", result_code="output_limit_exceeded")
-                        return PowerShellReadOutcome(PowerShellReadStatus.FAILED, result_code="output_limit_exceeded")
+                        return stopped("powershell_read_failed", PowerShellReadStatus.FAILED, "output_limit_exceeded")
                     payload = None
         except OSError:
             emit("powershell_read_failed", result_code="start_failed")

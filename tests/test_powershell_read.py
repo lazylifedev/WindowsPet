@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from threading import Event
 
@@ -42,6 +43,7 @@ def test_builder_is_fixed_hashable_and_contains_no_mutating_constructs():
 class FakeProcess:
     def __init__(self, stdout, stderr=b"", code=0): self.stdout, self.stderr, self.returncode, self.terminated = stdout, stderr, code, False
     def communicate(self, stdin=None, timeout=None): self.stdin, self.timeout = stdin, timeout; return self.stdout, self.stderr
+    def poll(self): return self.returncode
     def terminate(self): self.terminated = True
 
 
@@ -83,3 +85,80 @@ def test_runner_builds_and_validates_its_own_plan_before_starting_a_process(tmp_
 
 def test_result_validator_rejects_sensitive_or_unknown_shape():
     with pytest.raises(ValueError): validate_result({"schemaVersion":1,"operation":"network","items":[{"interfaceAlias":"x","status":"Up","ipv4Addresses":[],"defaultGateway":None,"guid":"secret"}]}, WindowsInspectionArea.NETWORK, 1)
+
+
+class CleanupProcess(FakeProcess):
+    def __init__(self, *, cleanup_timeouts=0):
+        super().__init__(b"{}")
+        self.returncode, self.calls, self.killed = None, [], False
+        self.cleanup_timeouts = cleanup_timeouts
+
+    def communicate(self, stdin=None, timeout=None):
+        self.calls.append((stdin, timeout))
+        if stdin is not None:
+            raise subprocess.TimeoutExpired("powershell", timeout)
+        if self.cleanup_timeouts:
+            self.cleanup_timeouts -= 1
+            raise subprocess.TimeoutExpired("powershell", timeout)
+        self.returncode = 0
+        return self.stdout, self.stderr
+
+    def terminate(self): self.terminated = True
+    def kill(self): self.killed = True
+
+
+def test_cancel_cleanup_communicate_is_bounded_and_does_not_touch_other_process(tmp_path):
+    root, _ = powershell_root(tmp_path); cancel = Event(); process = CleanupProcess()
+    class OtherProcess:
+        def terminate(self): raise AssertionError("inspection target must not be terminated")
+        def kill(self): raise AssertionError("inspection target must not be killed")
+    other = OtherProcess()
+    def factory(*args, **kwargs):
+        cancel.set()
+        return process
+    outcome = PowerShellReadRunner(windows_directory_resolver=lambda: root, process_factory=factory).execute(request(), cancel)
+    assert outcome.result_code == "cancelled" and process.terminated and not process.killed
+    assert process.calls == [(None, 2.0)]
+    assert other is not None
+
+
+def test_timeout_cleanup_communicate_is_bounded(tmp_path):
+    root, _ = powershell_root(tmp_path); process = CleanupProcess(); ticks = iter((0.0, 11.0))
+    outcome = PowerShellReadRunner(windows_directory_resolver=lambda: root, process_factory=lambda *a, **k: process,
+                                   clock=lambda: next(ticks)).execute(request())
+    assert outcome.result_code == "timeout" and process.terminated and process.calls == [(None, 2.0)]
+
+
+def test_cleanup_kills_only_when_terminate_does_not_finish_and_is_bounded(tmp_path):
+    root, _ = powershell_root(tmp_path); process = CleanupProcess(cleanup_timeouts=1); cancel = Event()
+    def factory(*args, **kwargs): cancel.set(); return process
+    outcome = PowerShellReadRunner(windows_directory_resolver=lambda: root, process_factory=factory).execute(request(), cancel)
+    assert outcome.result_code == "cancelled" and process.terminated and process.killed
+    assert process.calls == [(None, 2.0), (None, 2.0)]
+
+
+def test_cleanup_failure_returns_result_and_does_not_terminate_exited_process(tmp_path):
+    root, _ = powershell_root(tmp_path); process = CleanupProcess(cleanup_timeouts=2); cancel = Event()
+    def factory(*args, **kwargs): cancel.set(); return process
+    outcome = PowerShellReadRunner(windows_directory_resolver=lambda: root, process_factory=factory).execute(request(), cancel)
+    assert outcome.status is PowerShellReadStatus.FAILED and outcome.result_code == "child_cleanup_failed"
+    exited = FakeProcess(b"{}", code=0)
+    assert PowerShellReadRunner._terminate_owned_process(exited) and not exited.terminated and exited.timeout == 2.0
+
+
+@pytest.mark.parametrize("component", ["System32", "WindowsPowerShell", "v1.0"])
+def test_reparse_parent_prevents_popen(tmp_path, monkeypatch, component):
+    root, _ = powershell_root(tmp_path); calls = []
+    runner = PowerShellReadRunner(windows_directory_resolver=lambda: root, process_factory=lambda *a, **k: calls.append(a))
+    original = runner._is_link_or_reparse
+    monkeypatch.setattr(runner, "_is_link_or_reparse", lambda path: path.name == component or original(path))
+    assert runner.execute(request()).status is PowerShellReadStatus.NOT_AVAILABLE and calls == []
+
+
+def test_resolved_executable_outside_windows_directory_prevents_popen(tmp_path, monkeypatch):
+    root, executable = powershell_root(tmp_path); outside = tmp_path.parent / (tmp_path.name + "-outside") / "powershell.exe"; outside.parent.mkdir(); outside.write_bytes(b"x")
+    executable.unlink(); executable.symlink_to(outside)
+    calls = []
+    runner = PowerShellReadRunner(windows_directory_resolver=lambda: root, process_factory=lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(runner, "_is_link_or_reparse", lambda path: False)
+    assert runner.execute(request()).status is PowerShellReadStatus.NOT_AVAILABLE and calls == []
