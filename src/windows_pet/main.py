@@ -21,6 +21,7 @@ from .local_inspection_window import LocalInspectionWindow
 from .audit_log import JsonlAuditSink
 from .chat_application_launch_controller import ChatApplicationLaunchController
 from .ai_worker import AIWorker
+from .character_runtime_events import CharacterRuntimeEventDispatcher
 
 
 def configure_application(app: QApplication) -> QApplication:
@@ -45,6 +46,11 @@ class PetWindow(QWidget):
         self._last_activity = QTimer(self); self._last_activity.setSingleShot(True); self._last_activity.timeout.connect(lambda: self.play("sleep"))
         self._timer = QTimer(self); self._timer.setSingleShot(True); self._timer.timeout.connect(self._next_frame)
         self._animation = None; self._frame = 0; self._animation_generation = 0
+        self.dispatcher = CharacterRuntimeEventDispatcher(animations, self._play_animation_now)
+        self._single_click_timer = QTimer(self); self._single_click_timer.setSingleShot(True); self._single_click_timer.timeout.connect(self._dispatch_single_click)
+        self._suppress_next_single_release = False
+        self._hover_timer = QTimer(self); self._hover_timer.setSingleShot(True); self._hover_timer.timeout.connect(self._trigger_hover_long)
+        self._hover_triggered = False; self._last_hover_long_ms = -30000
         self.audit_sink = audit_sink or JsonlAuditSink(position_path.parent / "audit.jsonl")
         self.input_bubble = InputBubble(self, worker_factory=lambda history: AIWorker(history, audit=self.audit_sink))
         self.launch_controller = ChatApplicationLaunchController(self.input_bubble.complete_local_action, self, self.audit_sink, show_status=self.input_bubble.show_local_action_status)
@@ -74,9 +80,13 @@ class PetWindow(QWidget):
         self.play("idle"); self._last_activity.start(30000)
 
     def play(self, name: str):
-        if name == "sleep" and not self._can_sleep(): return
-        if name not in self.animations: return
+        if name == "sleep" and not self._can_sleep(): return False
+        return self.dispatcher.trigger(name) if name in {"wave", "single_click", "double_click", "right_click", "hover_long", "drag_start", "drag_end"} else self.dispatcher.set_state(name)
+
+    def _play_animation_now(self, name: str, generation: int):
         self._animation_generation += 1
+        # The dispatcher generation identifies logical requests; the player keeps
+        # its historical monotonic token for stale Qt timer protection.
         self._animation, self._frame = self.animations[name], 0
         self._timer.stop(); self._show_frame(); self._schedule_current_frame()
         if name != "sleep" and not self.input_bubble.isVisible() and not self.input_bubble.pending: self._last_activity.start(30000)
@@ -97,7 +107,9 @@ class PetWindow(QWidget):
     def _next_frame(self):
         self._frame += 1
         if self._frame >= len(self._animation.frames):
-            if self._animation.playback.value == "once": self.play("idle"); return
+            if self._animation.playback.value == "once":
+                self.dispatcher.animation_completed(self._animation.event_id, self.dispatcher.generation)
+                return
             self._frame = 0
         self._show_frame()
         self._schedule_current_frame()
@@ -125,9 +137,16 @@ class PetWindow(QWidget):
         if not self.should_keep_input_bubble_visible(): self._hide_chat_bubble()
 
     def enterEvent(self, event):
-        self._pet_hovered = True; self.cancel_input_bubble_hide(); self._activity(); self._show_chat_bubble(); super().enterEvent(event)
+        self._pet_hovered = True; self._hover_triggered = False; self._arm_hover_timer(); self.cancel_input_bubble_hide(); self._activity(); self._show_chat_bubble(); super().enterEvent(event)
     def leaveEvent(self, event):
-        self._pet_hovered = False; self.schedule_input_bubble_hide(); super().leaveEvent(event)
+        self._pet_hovered = False; self._hover_timer.stop(); self._hover_triggered = False; self.schedule_input_bubble_hide(); super().leaveEvent(event)
+    def _arm_hover_timer(self):
+        if self._hover_triggered or self._last_hover_long_ms + 30000 > __import__('time').monotonic() * 1000:
+            return
+        self._hover_timer.start(2000)
+    def _trigger_hover_long(self):
+        if self._pet_hovered and not self._dragged and self.play("hover_long"):
+            self._hover_triggered = True; self._last_hover_long_ms = __import__('time').monotonic() * 1000
     def open_chat(self):
         if not self.input_bubble.isVisible():
             self._show_chat_bubble()
@@ -218,21 +237,32 @@ class PetWindow(QWidget):
             self.input_bubble._position_response()
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
-            self._activity(); self._press_position = event.globalPosition().toPoint(); self._drag_offset = self._press_position - self.pos(); self._dragged = False
+            self._activity(); self._hover_timer.stop(); self._press_position = event.globalPosition().toPoint(); self._drag_offset = self._press_position - self.pos(); self._dragged = False
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._drag_offset is not None and event.buttons() & Qt.LeftButton:
-            current = event.globalPosition().toPoint(); self._dragged = self._dragged or (current - self._press_position).manhattanLength() >= self.DRAG_THRESHOLD
-            if self._dragged: self.move(current - self._drag_offset)
+            current = event.globalPosition().toPoint(); started_drag = not self._dragged and (current - self._press_position).manhattanLength() >= self.DRAG_THRESHOLD; self._dragged = self._dragged or started_drag
+            if self._dragged:
+                self._hover_timer.stop()
+                if started_drag: self.play("drag_start")
+                self.move(current - self._drag_offset)
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
             dragged = self._dragged; self._drag_offset = None; self._press_position = None
-            if dragged: self.play("wave")
-            else: self.toggle_chat_bubble()
+            if dragged:
+                if not self.play("drag_end"): self.play("wave")
+            elif self._suppress_next_single_release:
+                self._suppress_next_single_release = False
+            else:
+                self._dispatch_single_click()
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        if event.button() == Qt.LeftButton: self.open_chat()
+        if event.button() == Qt.LeftButton:
+            self._single_click_timer.stop(); self._suppress_next_single_release = True; self.open_chat(); self.play("double_click")
     def contextMenuEvent(self, event: QContextMenuEvent):
+        self.play("right_click")
         menu = self._build_context_menu()
         menu.exec(event.globalPos())
+    def _dispatch_single_click(self):
+        self.toggle_chat_bubble(); self.play("single_click")
 
     def _build_context_menu(self):
         menu = QMenu(self)
@@ -299,6 +329,7 @@ class PetWindow(QWidget):
             super().closeEvent(event)
             return
         self._shutdown_complete = True
+        self._hover_timer.stop(); self._single_click_timer.stop(); self._timer.stop()
         self.launch_controller.shutdown()
         self.input_bubble.close()
         if self.openai_settings_window is not None: self.openai_settings_window.shutdown()

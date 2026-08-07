@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QApplication, QDialog, QFileDialog, QFrame, QHBox
                                QLayout, QLabel, QMessageBox, QPushButton, QScrollArea,
                                QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
 
-from .character_editor_model import EditableCharacter, EditableFrame
+from .character_editor_model import EditableAnimation, EditableCharacter, EditableFrame
 from .character_models import CharacterPackage, PlaybackMode
 from .character_package_loader import load_character_package
 from .character_working_package import (EditorImageError, create_working_from_builtin,
@@ -20,6 +20,7 @@ from .character_working_package import (EditorImageError, create_working_from_bu
 FRAME_MIME = "application/x-windowspet-character-frame"
 DEFAULT_DURATION_MS = 150
 MAX_FRAMES = 10
+OPTIONAL_EVENT_IDS = ("single_click", "double_click", "right_click", "hover_long", "drag_start", "drag_end")
 
 
 def natural_filename_key(path: Path):
@@ -220,12 +221,43 @@ class CharacterEditorWindow(QDialog):
         while self.content_layout.count():
             item = self.content_layout.takeAt(0); widget = item.widget(); widget and widget.deleteLater()
         self._rows, self._frame_scroll_areas = [], []
-        for animation in self.model.animations:
+        animations = list(self.model.animations)
+        configured = {animation.event_id for animation in animations}
+        for event_id in OPTIONAL_EVENT_IDS:
+            if event_id not in configured:
+                row = QFrame(); row.setFrameShape(QFrame.StyledPanel); box = QHBoxLayout(row)
+                box.addWidget(QLabel(f"{event_id}    optional    unconfigured")); box.addStretch()
+                configure = QPushButton("Configure"); configure.setAccessibleName(f"configure {event_id}")
+                configure.setEnabled(not self.recovery_mode)
+                configure.clicked.connect(lambda _, e=event_id: self.configure_optional_event(e))
+                box.addWidget(configure); row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                row.setMinimumHeight(row.sizeHint().height()); row.setMaximumHeight(row.minimumHeight())
+                self.content_layout.addWidget(row)
+        for animation in animations:
             row = QFrame(); row.setFrameShape(QFrame.StyledPanel); box = QVBoxLayout(row); header = QHBoxLayout(); header.addWidget(QLabel(f"{animation.event_id}    {'必須' if animation.required else '任意'}    {animation.playback.value}    {len(animation.frames)} / 10"))
             play, stop = QPushButton("▶ プレビュー"), QPushButton("■ 停止"); play.clicked.connect(lambda _, a=animation: self.start_preview(a)); stop.clicked.connect(self.stop_preview); header.addStretch(); header.addWidget(play); header.addWidget(stop); box.addLayout(header)
+            if not animation.required:
+                remove_event = QPushButton("Remove event"); remove_event.setAccessibleName(f"remove {animation.event_id}")
+                remove_event.setEnabled(not self.recovery_mode)
+                remove_event.clicked.connect(lambda _, a=animation: self.remove_optional_event(a))
+                header.addWidget(remove_event)
             strip = AnimationFrameStrip(self, animation); strip.rebuild(); box.addWidget(strip)
             row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed); row.setMinimumHeight(row.sizeHint().height()); row.setMaximumHeight(row.minimumHeight()); self.content_layout.addWidget(row); self._rows.append(row); self._frame_scroll_areas.append(strip)
         self.content_layout.addStretch()
+    def configure_optional_event(self, event_id):
+        paths = self._select_pngs()
+        if not paths: return False
+        if not 2 <= len(paths) <= MAX_FRAMES:
+            QMessageBox.warning(self, "WindowsPet", "Select between 2 and 10 PNG frames."); return False
+        try: staged = self._stage_batch(paths)
+        except EditorImageError:
+            QMessageBox.warning(self, "WindowsPet", "The selected files must all be valid PNG images."); return False
+        frames = [EditableFrame(self.model.frame_id_for(event_id), f"animations/{event_id}/{uuid4().hex}.png", DEFAULT_DURATION_MS, pixmap, path) for path, pixmap in staged]
+        self.model.animations.append(EditableAnimation(event_id, False, PlaybackMode.ONCE, frames))
+        self._set_dirty(True); self._render(); return True
+    def remove_optional_event(self, animation):
+        if animation.required: return False
+        self.model.animations.remove(animation); self._set_dirty(True); self._render(); return True
     def _card(self, strip, animation, frame, index):
         card = QFrame(); card.setFrameShape(QFrame.StyledPanel); card.setFixedWidth(150); card.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed); box = QVBoxLayout(card); box.setSizeConstraint(QLayout.SetMinimumSize)
         top = QHBoxLayout(); top.addWidget(FrameDragHandle(strip, animation, frame)); top.addWidget(QLabel(f"frame {index + 1}")); top.addStretch(); box.addLayout(top)

@@ -50,6 +50,20 @@ def test_schema_loads_immutable_models_and_optional_event(tmp_path, qapp):
         package.animations["other"] = package.animations["idle"]
 
 
+@pytest.mark.parametrize("change", [
+    {"required": True, "playback": "once"},
+    {"required": False, "playback": "loop"},
+])
+def test_known_optional_events_must_be_optional_once(tmp_path, qapp, change):
+    data = _package(tmp_path)
+    data["animations"]["single_click"] = {**change, "frames": [
+        {"id": "click_1", "file": "frame.png", "durationMs": 60},
+        {"id": "click_2", "file": "frame.png", "durationMs": 60},
+    ]}
+    (tmp_path / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
+    assert _error(tmp_path) is CharacterPackageErrorCode.INVALID_PLAYBACK
+
+
 @pytest.mark.parametrize(("mutation", "code"), [
     (lambda d: d.update(schemaVersion=2), CharacterPackageErrorCode.UNSUPPORTED_SCHEMA),
     (lambda d: d.update(unexpected=True), CharacterPackageErrorCode.INVALID_MANIFEST),

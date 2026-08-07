@@ -21,6 +21,7 @@ MAX_PACKAGE_TOTAL_PIXELS = 67_108_864
 MAX_PACKAGE_ENTRIES = 1000
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 REQUIRED_EVENTS = {"idle": PlaybackMode.LOOP, "sleep": PlaybackMode.LOOP, "thinking": PlaybackMode.LOOP, "wave": None}
+OPTIONAL_EVENTS = {"single_click", "double_click", "right_click", "hover_long", "drag_start", "drag_end"}
 FORBIDDEN_SUFFIXES = {".py", ".pyw", ".ps1", ".bat", ".cmd", ".exe", ".dll", ".com", ".scr", ".msi", ".js", ".vbs", ".vbe", ".jse", ".ws", ".wsf", ".wsh", ".hta", ".jar", ".lnk", ".url"}
 ALLOWED_SUFFIXES = {".png", ".txt", ".md"}
 
@@ -222,6 +223,9 @@ def load_character_package(package_root: Path) -> CharacterPackage:
         if animation is None or not animation.required:
             _fail(CharacterPackageErrorCode.MISSING_REQUIRED_EVENT)
         if expected is not None and animation.playback is not expected:
+            _fail(CharacterPackageErrorCode.INVALID_PLAYBACK)
+    for event_id, animation in animations.items():
+        if event_id in OPTIONAL_EVENTS and (animation.required or animation.playback is not PlaybackMode.ONCE):
             _fail(CharacterPackageErrorCode.INVALID_PLAYBACK)
     return CharacterPackage(1, package_id, top["name"], top["version"], author, license_name, thumbnail, root, animations)
 
