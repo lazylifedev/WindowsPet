@@ -21,10 +21,16 @@ from .chat_application_launch_controller import ChatApplicationLaunchController
 from .ai_worker import AIWorker
 
 
+def configure_application(app: QApplication) -> QApplication:
+    """Keep Qt alive while the Qt.Tool pet is the only visible window."""
+    app.setQuitOnLastWindowClosed(False)
+    return app
+
+
 class PetWindow(QWidget):
     DRAG_THRESHOLD = 8
 
-    def __init__(self, animations, position_path: Path, audit_sink=None):
+    def __init__(self, animations, position_path: Path, audit_sink=None, quit_callback=None):
         super().__init__()
         self.animations, self.position_path = animations, position_path
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -45,6 +51,9 @@ class PetWindow(QWidget):
         self.help_window = None
         self.local_inspection_window = None
         self.tray_icon = None; self.tray_menu = None
+        self._exit_requested = False
+        self._shutdown_complete = False
+        self._quit_callback = quit_callback or QApplication.quit
         self.input_bubble.search_completed.connect(self._on_search_completed)
         self.input_bubble.application_launch_ready.connect(self.launch_controller.request)
         self.input_bubble.cancel_processing_requested.connect(self.cancel_current_processing)
@@ -152,9 +161,13 @@ class PetWindow(QWidget):
         if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick): self.show_pet()
 
     def quit_application(self):
+        """Perform the application's sole explicit shutdown path exactly once."""
+        if self._exit_requested:
+            return
+        self._exit_requested = True
         if self.tray_icon is not None: self.tray_icon.hide()
-        app = QApplication.instance()
-        if app is not None: app.quit()
+        self.close()
+        self._quit_callback()
 
     def close_chat(self):
         if self.input_bubble.isVisible():
@@ -227,7 +240,7 @@ class PetWindow(QWidget):
         menu.addAction('会話履歴', self.input_bubble.show_history)
         menu.addAction('使い方', self.show_help)
         menu.addAction('位置をリセット', self.reset_position)
-        menu.addAction('終了', QApplication.instance().quit)
+        menu.addAction('終了', self.quit_application)
         return menu
     def reset_position(self): self.move(100, 100); self._activity()
     def open_file_search_settings(self):
@@ -267,6 +280,10 @@ class PetWindow(QWidget):
         return False
 
     def closeEvent(self, event):
+        if self._shutdown_complete:
+            super().closeEvent(event)
+            return
+        self._shutdown_complete = True
         self.launch_controller.shutdown()
         self.input_bubble.close()
         if self.openai_settings_window is not None: self.openai_settings_window.shutdown()
@@ -280,6 +297,7 @@ def main() -> int:
     root = application_root(); (root / "logs").mkdir(exist_ok=True); logging.basicConfig(filename=root / "logs" / "windows_pet.log", level=logging.INFO, encoding="utf-8")
     logging.info("startup diagnostics frozen=%s manifest_present=%s", getattr(sys, "frozen", False), (assets_root() / "manifest.json").is_file())
     app = QApplication(sys.argv)
+    configure_application(app)
     try: animations = load_animations(assets_root()); logging.info("animation assets loaded")
     except RuntimeError as exc: logging.exception("asset loading failed"); QMessageBox.critical(None, "Windows Pet", str(exc)); return 1
     audit_sink = JsonlAuditSink(root / "data" / "audit.jsonl")
