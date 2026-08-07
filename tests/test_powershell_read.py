@@ -33,6 +33,20 @@ def test_inspection_tool_schema_is_strict_and_exposed():
     assert tool["parameters"]["required"] == ["area", "query", "max_results"]
 
 
+def test_fake_responses_send_process_stop_tool_and_preserve_single_definition():
+    class Responses:
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return type("Response", (), {"output": [], "output_text": "ok"})()
+    fake = type("Client", (), {"responses": Responses()})()
+    AIClient(client=fake, api_key="test-key").stream_with_tools([], lambda _: None)
+    tools = fake.responses.kwargs["tools"]
+    stops = [tool for tool in tools if tool["name"] == "request_process_stop"]
+    assert len(stops) == 1
+    assert stops[0]["strict"] is True
+    assert stops[0]["parameters"]["required"] == ["process_id", "expected_process_name"]
+
+
 def test_builder_is_fixed_hashable_and_contains_no_mutating_constructs():
     plan = build_read_plan(request("services", "update", 50))
     assert plan == build_read_plan(request("services", "other", 1))
