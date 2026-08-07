@@ -14,6 +14,7 @@ from .openai_credentials import get_api_key
 from .application_launch_request import parse_application_launch_request
 from .process_stop_request import parse_process_stop_request
 from .powershell_read_runner import PowerShellReadRunner
+from .process_inspection import normalize_process_query, resolve_process_candidate
 
 APPLICATION_LAUNCH_HANDOFF = object()
 
@@ -96,7 +97,7 @@ class AIClient:
 
     def stream_with_tools(self, history, on_delta, on_search_started=None, on_search_completed=None, cancel=None, on_application_launch_requested=None, on_powershell_started=None, on_powershell_completed=None, on_process_stop_requested=None) -> str:
         """Run the public Responses API tool loop; full paths never enter API input."""
-        seen=set(); failed_inspections=set(); inputs=list(history); dispatcher=ToolDispatcher(); calls=0
+        seen=set(); failed_inspections=set(); inspected_processes={}; inspection_snapshots={}; inputs=list(history); dispatcher=ToolDispatcher(); calls=0
         try:
             while calls < 3:
                 self._raise_if_cancelled(cancel)
@@ -121,6 +122,12 @@ class AIClient:
                     if not call_id or call_id in seen or len(calls_found) != 1: raise AIClientError("tool", "unsupported_tool")
                     try: request = parse_process_stop_request(getattr(call, "arguments", ""))
                     except ValueError as exc: raise AIClientError("tool", "invalid_stop_request") from exc
+                    # The model may only hand off an identity returned by the
+                    # immediately preceding local process inspection.  In
+                    # particular, a UI/display name must never become the
+                    # resolver's expected ProcessName.
+                    if inspected_processes.get(request.process_id) != request.expected_process_name:
+                        raise AIClientError("tool", "process_identity_not_from_inspection")
                     if on_process_stop_requested: on_process_stop_requested(request)
                     return APPLICATION_LAUNCH_HANDOFF
                 if name == "inspect_windows":
@@ -131,9 +138,22 @@ class AIClient:
                     if signature in failed_inspections: raise AIClientError("tool", "inspection_retry_blocked")
                     seen.add(call_id); calls += 1
                     if on_powershell_started: on_powershell_started(request.area.value)
-                    outcome = self.inspection_runner.execute(request, cancel)
+                    effective_request = request
+                    if request.area.value == "processes":
+                        effective_request = request.__class__(request.area, normalize_process_query(request.query), request.max_results)
+                    outcome = self.inspection_runner.execute(effective_request, cancel)
                     if outcome.status.value == "cancelled": raise AIClientError("cancelled", "Windows調査をキャンセルしました。")
                     safe = dispatcher.safe_inspection_output(outcome, request.area.value)
+                    if request.area.value == "processes" and outcome.status.value == "success":
+                        items = safe.get("items", [])
+                        snapshot, candidate, reason = resolve_process_candidate(request.query, items, truncated=len(items) >= request.max_results)
+                        inspection_snapshots = snapshot.processes
+                        # Only the locally resolved, unique candidate may be handed
+                        # to the stop tool; arbitrary rows remain display data.
+                        inspected_processes = {candidate[0]: candidate[1]} if candidate is not None else {}
+                        safe["inspection_reason"] = reason
+                        if candidate is not None:
+                            safe["candidate"] = {"process_id": candidate[0], "canonical_process_name": candidate[1]}
                     if outcome.result_code in {"invalid_output", "not_available", "execution_failed", "timeout", "output_limit_exceeded", "child_cleanup_failed"}: failed_inspections.add(signature)
                     if on_powershell_completed: on_powershell_completed(safe)
                     inputs.extend(getattr(response, "output", [])); inputs.append({"type":"function_call_output","call_id":call_id,"output":json.dumps(safe, ensure_ascii=False)})
