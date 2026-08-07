@@ -16,12 +16,14 @@ from .search_result_store import SearchResultStore
 from .openai_settings_window import OpenAISettingsWindow
 from .help_window import HelpWindow
 from .local_inspection_window import LocalInspectionWindow
+from .audit_log import JsonlAuditSink
+from .chat_application_launch_controller import ChatApplicationLaunchController
 
 
 class PetWindow(QWidget):
     DRAG_THRESHOLD = 8
 
-    def __init__(self, animations, position_path: Path):
+    def __init__(self, animations, position_path: Path, audit_sink=None):
         super().__init__()
         self.animations, self.position_path = animations, position_path
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -33,6 +35,8 @@ class PetWindow(QWidget):
         self._timer = QTimer(self); self._timer.timeout.connect(self._next_frame)
         self._animation = None; self._frame = 0
         self.input_bubble = InputBubble(self)
+        self.audit_sink = audit_sink or JsonlAuditSink(position_path.parent / "audit.jsonl")
+        self.launch_controller = ChatApplicationLaunchController(self.input_bubble.complete_local_action, self, self.audit_sink)
         self.search_store = SearchResultStore()
         self.search_settings_window = None
         self.search_results_window = None
@@ -41,6 +45,7 @@ class PetWindow(QWidget):
         self.local_inspection_window = None
         self.tray_icon = None; self.tray_menu = None
         self.input_bubble.search_completed.connect(self._on_search_completed)
+        self.input_bubble.application_launch_requested.connect(self.launch_controller.request)
         self.input_bubble.api_settings_requested.connect(self.open_openai_settings)
         self._pet_hovered = False; self._input_hovered = False; self._input_has_focus = False
         self._draft_exists = False; self._api_request_in_progress = False
@@ -252,6 +257,7 @@ class PetWindow(QWidget):
             self.search_results_window._populate()
         self.search_results_window.show(); self.search_results_window.raise_(); self.search_results_window.activateWindow()
     def closeEvent(self, event):
+        self.launch_controller.shutdown()
         self.input_bubble.close()
         if self.openai_settings_window is not None: self.openai_settings_window.shutdown()
         if self.help_window is not None: self.help_window.close()
@@ -266,7 +272,8 @@ def main() -> int:
     app = QApplication(sys.argv)
     try: animations = load_animations(assets_root()); logging.info("animation assets loaded")
     except RuntimeError as exc: logging.exception("asset loading failed"); QMessageBox.critical(None, "Windows Pet", str(exc)); return 1
-    window = PetWindow(animations, root / "data" / "position.json"); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.setup_system_tray(); window.show(); logging.info("pet window shown"); app.aboutToQuit.connect(window.input_bubble.close); return app.exec()
+    audit_sink = JsonlAuditSink(root / "data" / "audit.jsonl")
+    window = PetWindow(animations, root / "data" / "position.json", audit_sink); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.setup_system_tray(); window.show(); logging.info("pet window shown"); app.aboutToQuit.connect(window.input_bubble.close); return app.exec()
 
 
 if __name__ == "__main__": raise SystemExit(main())

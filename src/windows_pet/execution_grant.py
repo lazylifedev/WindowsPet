@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from .action_models import ActionProposal, ToolContract, proposal_fingerprint
 from .policy_gate import PolicyGate
+from .audit_log import AuditEvent, NullAuditSink
 
 
 class GrantState(str, Enum):
@@ -53,7 +54,7 @@ class GrantConsumeResult:
 
 class ExecutionGrantStore:
     """Non-persistent grant state; it has no public issuance API."""
-    def __init__(self, now=None, lifetime=timedelta(seconds=90), id_factory=None, policy=None, session_lookup=None):
+    def __init__(self, now=None, lifetime=timedelta(seconds=90), id_factory=None, policy=None, session_lookup=None, audit=None):
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.lifetime = lifetime
         self.id_factory = id_factory or (lambda: secrets.token_urlsafe(24))
@@ -61,6 +62,7 @@ class ExecutionGrantStore:
         self.session_lookup = session_lookup or (lambda _: None)
         self._lock = threading.Lock()
         self._records: dict[str, _Record] = {}
+        self.audit = audit or NullAuditSink()
 
     def _record_grant(self, proposal: ActionProposal, session_id: str) -> ExecutionGrant:
         if not session_id:
@@ -89,6 +91,7 @@ class ExecutionGrantStore:
             if record.grant.proposal_fingerprint != proposal.fingerprint or proposal.fingerprint != proposal_fingerprint(proposal): return GrantConsumeResult(False, GrantResultCode.FINGERPRINT_MISMATCH)
             if self.policy.evaluate(contract, proposal).decision.value != "require_confirmation": return GrantConsumeResult(False, GrantResultCode.POLICY_DENIED)
             record.state = GrantState.CONSUMED
+            self.audit.write(AuditEvent("grant_consumed", grant_id=grant_id, proposal_id=proposal.proposal_id, proposal_fingerprint=proposal.fingerprint, tool_name=contract.name, tool_version=contract.version, operation=contract.operation, side_effect=contract.side_effect.value))
             return GrantConsumeResult(True, GrantResultCode.CONSUMED)
 
     def cancel(self, grant_id: str) -> GrantResultCode:

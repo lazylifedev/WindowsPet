@@ -60,7 +60,7 @@ class ConfirmationGate:
         self.session_id_factory = session_id_factory or (lambda: secrets.token_urlsafe(18))
         self._sessions: dict[str, ConfirmationSession] = {}
         self._lock = threading.RLock()
-        self.grants = grants or ExecutionGrantStore(policy=self.policy, session_lookup=self._sessions.get)
+        self.grants = grants or ExecutionGrantStore(policy=self.policy, session_lookup=self._sessions.get, audit=self.audit)
 
     def prepare(self, contract, proposal):
         result = self.policy.evaluate(contract, proposal)

@@ -60,7 +60,7 @@ def test_approved_fake_product_flow_starts_without_real_process():
     outcome = executor.execute(grant.grant_id, proposal, target)
     assert outcome == type(outcome)(ApplicationLaunchStatus.STARTED, "process_running")
     assert calls and calls[0][0] == ([target.canonical_path],)
-    assert [event.event_type for event in audit.events][-4:] == ["grant_issued", "execution_started", "verification_succeeded", "execution_succeeded"]
+    assert [event.event_type for event in audit.events][-5:] == ["grant_issued", "grant_consumed", "execution_started", "verification_succeeded", "execution_succeeded"]
 
 
 def test_executor_rejects_contract_mismatch_before_consuming_grant():

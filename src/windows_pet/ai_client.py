@@ -11,6 +11,7 @@ from .file_search_service import FileSearchService
 from .file_search_settings import SearchSettings
 from .tool_dispatcher import ToolDispatcher
 from .openai_credentials import get_api_key
+from .application_launch_request import parse_application_launch_request
 
 INSTRUCTIONS = """あなたはWindows上で動作する小さくて親しみやすいデスクトップアシスタントです。
 基本的に日本語で、簡潔かつ正確に回答してください。
@@ -84,13 +85,13 @@ class AIClient:
         except Exception as exc:
             raise classify_openai_error(exc) from exc
 
-    def stream_with_tools(self, history, on_delta, on_search_started=None, on_search_completed=None, cancel=None) -> str:
+    def stream_with_tools(self, history, on_delta, on_search_started=None, on_search_completed=None, cancel=None, on_application_launch_requested=None) -> str:
         """Run the public Responses API tool loop; full paths never enter API input."""
         seen=set(); inputs=list(history); dispatcher=ToolDispatcher(); calls=0
         try:
             while calls < 3:
                 self._raise_if_cancelled(cancel)
-                response=self.client.responses.create(model=model_name(), instructions=INSTRUCTIONS, input=inputs, tools=self._tools(), store=False)
+                response=self.client.responses.create(model=model_name(), instructions=INSTRUCTIONS, input=inputs, tools=self._tools() + [self._launch_tool()], store=False)
                 self._raise_if_cancelled(cancel)
                 calls_found=[x for x in getattr(response, 'output', []) if getattr(x, 'type', '') == 'function_call']
                 if not calls_found:
@@ -101,6 +102,12 @@ class AIClient:
                     return text
                 self._raise_if_cancelled(cancel)
                 call=calls_found[0]; call_id=getattr(call,'call_id',None); name=getattr(call,'name',None)
+                if name == 'request_application_launch':
+                    if not call_id or call_id in seen or len(calls_found) != 1: raise AIClientError('tool', 'unsupported_tool')
+                    try: request = parse_application_launch_request(getattr(call, 'arguments', ''), history)
+                    except ValueError as exc: raise AIClientError('tool', 'invalid_launch_request') from exc
+                    if on_application_launch_requested: on_application_launch_requested(request)
+                    return 'アプリの起動候補を確認します。'
                 if not call_id or call_id in seen or name != 'search_files': raise AIClientError('tool', 'この操作にはまだ対応していません。')
                 seen.add(call_id); calls += 1
                 self._raise_if_cancelled(cancel)
@@ -119,6 +126,9 @@ class AIClient:
             raise AIClientError('tool_limit','ファイル検索の呼び出し回数が上限に達しました。')
         except AIClientError: raise
         except Exception as exc: raise classify_openai_error(exc) from exc
+
+    def _launch_tool(self):
+        return {"type":"function","name":"request_application_launch","description":"アプリ起動の確認を依頼します。このTool callだけでは起動しません。","parameters":{"type":"object","properties":{"application_name":{"type":"string","minLength":1,"maxLength":200},"exact_path":{"type":["string","null"],"maxLength":1024}},"required":["application_name","exact_path"],"additionalProperties":False},"strict":True}
 
     def _tools(self):
         return [{"type":"function","name":"search_files","description":"許可済みフォルダーを読み取り専用で検索します。ファイル本文は検索しません。","parameters":{"type":"object","properties":{"query":{"type":"string"},"root_ids":{"type":"array","items":{"type":"string"}},"extensions":{"type":"array","items":{"type":"string"}},"modified_after":{"type":["string","null"]},"modified_before":{"type":["string","null"]},"min_size_bytes":{"type":["integer","null"]},"max_size_bytes":{"type":["integer","null"]},"include_directories":{"type":"boolean"},"max_results":{"type":"integer"}},"required":["query","root_ids","extensions","modified_after","modified_before","min_size_bytes","max_size_bytes","include_directories","max_results"],"additionalProperties":False},"strict":True}]
