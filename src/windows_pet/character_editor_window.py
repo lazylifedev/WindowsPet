@@ -202,7 +202,7 @@ class AnimationFrameStrip(QScrollArea):
 
 class CharacterEditorWindow(QDialog):
     def __init__(self, builtin: CharacterPackage, working_root: Path, parent=None):
-        super().__init__(parent); self.setWindowTitle("キャラクターアニメーション設定"); self.resize(1000, 700); self.setMinimumSize(700, 500)
+        super().__init__(parent); self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint); self.setWindowTitle("キャラクターアニメーション設定"); self.resize(1000, 700); self.setMinimumSize(700, 500)
         self.builtin, self.working_root, self.model, self.dirty, self._rows = builtin, Path(working_root), None, False, []
         self.recovery_mode = False; self.session_token = uuid4().hex; self.session = self.working_root.parent / f".editor-session-{self.session_token}"; self.session.mkdir(parents=True, exist_ok=False)
         self.preview_timer = QTimer(self); self.preview_timer.setSingleShot(True); self.preview_timer.timeout.connect(self._next_preview); self.preview_animation = None; self.preview_index = 0

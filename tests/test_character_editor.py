@@ -173,6 +173,14 @@ def test_closing_editor_does_not_quit_application(tmp_path, qapp):
     assert not calls
 
 
+def test_editor_enables_maximize_button_and_keeps_minimum_size(tmp_path, qapp):
+    editor = CharacterEditorWindow(load_builtin_default_character(Path("assets/animations")), tmp_path / "working")
+    assert editor.windowFlags() & Qt.WindowMaximizeButtonHint
+    assert editor.minimumWidth() == 700
+    assert editor.minimumHeight() == 500
+    editor.close()
+
+
 def test_editor_frame_rows_keep_complete_cards_in_horizontal_only_scroll_areas(tmp_path, qapp):
     editor = CharacterEditorWindow(load_builtin_default_character(Path("assets/animations")), tmp_path / "working")
     editor.resize(1000, 700); editor.show(); QApplication.processEvents()
