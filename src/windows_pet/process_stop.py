@@ -6,6 +6,7 @@ import os
 import subprocess
 import tempfile
 import time
+from threading import Event
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -87,6 +88,7 @@ class PowerShellExecutionRunner:
         self.grants, self.resolver, self.process_factory, self.clock, self.audit = grants, resolver or ProcessIdentityResolver(), process_factory, clock, audit or NullAuditSink()
         self.powershell_exe, self.working_directory = powershell_exe, working_directory
         self._active_process = None
+        self._cancel = Event()
     def _backend(self):
         """Bind execution to the installed Windows PowerShell, never PATH lookup."""
         if self.powershell_exe is not None:
@@ -115,14 +117,18 @@ class PowerShellExecutionRunner:
             return True
         except (OSError, subprocess.SubprocessError): return False
     def cancel(self):
-        if self._active_process is not None: self._cleanup(self._active_process)
+        """Signal cancellation without touching a child from the GUI thread."""
+        self._cancel.set()
+    def reset_cancel(self):
+        self._cancel.clear()
     def execute(self, grant_id, proposal: ActionProposal, identity: ProcessIdentity, cancel=None):
+        cancelled = lambda: self._cancel.is_set() or (cancel is not None and cancel.is_set())
         if not self._valid_request(proposal, identity): return PowerShellExecutionOutcome(PowerShellExecutionStatus.REJECTED, "invalid_request")
         if self.resolver.validate(identity) is not ProcessValidationCode.OK: return PowerShellExecutionOutcome(PowerShellExecutionStatus.REJECTED, "identity_changed")
-        if cancel is not None and cancel.is_set(): return PowerShellExecutionOutcome(PowerShellExecutionStatus.CANCELLED, "cancelled_before_consume")
+        if cancelled(): return PowerShellExecutionOutcome(PowerShellExecutionStatus.CANCELLED, "cancelled_before_consume")
         consumed = self.grants.consume_for(grant_id, STOP_PROCESS_CONTRACT, proposal)
         if not consumed.success: return PowerShellExecutionOutcome(PowerShellExecutionStatus.REJECTED, consumed.reason.value)
-        if cancel is not None and cancel.is_set(): return PowerShellExecutionOutcome(PowerShellExecutionStatus.CANCELLED, "cancelled_after_consume")
+        if cancelled(): return PowerShellExecutionOutcome(PowerShellExecutionStatus.CANCELLED, "cancelled_after_consume")
         backend = self._backend()
         if backend is None: return PowerShellExecutionOutcome(PowerShellExecutionStatus.REJECTED, "backend_unavailable")
         fd, name = tempfile.mkstemp(prefix="windows_pet_", suffix=".ps1"); path = Path(name)
@@ -131,6 +137,10 @@ class PowerShellExecutionRunner:
                 file.write(canonical_script(STOP_PROCESS_SCRIPT)); file.flush(); os.fsync(file.fileno())
             if hashlib.sha256(path.read_bytes()).hexdigest() != proposal.parameters["script_sha256"]: return PowerShellExecutionOutcome(PowerShellExecutionStatus.REJECTED, "script_hash_mismatch")
             if self.resolver.validate(identity) is not ProcessValidationCode.OK: return PowerShellExecutionOutcome(PowerShellExecutionStatus.REJECTED, "identity_changed")
+            if cancelled(): return PowerShellExecutionOutcome(PowerShellExecutionStatus.CANCELLED, "cancelled_before_start")
+            # Re-read immediately before Popen: no mutable script or stale identity window.
+            if hashlib.sha256(path.read_bytes()).hexdigest() != proposal.parameters["script_sha256"]: return PowerShellExecutionOutcome(PowerShellExecutionStatus.REJECTED, "script_hash_mismatch")
+            if cancelled(): return PowerShellExecutionOutcome(PowerShellExecutionStatus.CANCELLED, "cancelled_before_start")
             env = {"WINDOWSPET_PS_PARAMETERS":json.dumps({"pid":identity.pid}, separators=(",",":")), "SystemRoot":os.environ.get("SystemRoot",r"C:\\Windows"), "WINDIR":os.environ.get("WINDIR",r"C:\\Windows")}
             executable, cwd = backend
             kwargs = dict(shell=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(cwd), creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
@@ -138,7 +148,7 @@ class PowerShellExecutionRunner:
             self._active_process = self.process_factory([str(executable),"-NoLogo","-NoProfile","-NonInteractive","-File",str(path)], **kwargs)
             started = self.clock()
             while True:
-                if cancel is not None and cancel.is_set():
+                if cancelled():
                     self._cleanup(self._active_process); self._emit("powershell_execution_cancelled", proposal, grant_id, result_code="cancelled"); return PowerShellExecutionOutcome(PowerShellExecutionStatus.CANCELLED,"cancelled")
                 remaining = STOP_PROCESS_CONTRACT.timeout_seconds - (self.clock() - started)
                 if remaining <= 0:
