@@ -21,6 +21,12 @@ FRAME_MIME = "application/x-windowspet-character-frame"
 DEFAULT_DURATION_MS = 150
 MAX_FRAMES = 10
 OPTIONAL_EVENT_IDS = ("single_click", "double_click", "right_click", "hover_long", "drag_start", "drag_end")
+REQUIRED_EVENT_IDS = ("idle", "sleep", "thinking", "wave")
+OPTIONAL_EVENT_LABELS = {
+    "single_click": "シングルクリック", "double_click": "ダブルクリック",
+    "right_click": "右クリック", "hover_long": "長時間ホバー",
+    "drag_start": "ドラッグ開始", "drag_end": "ドラッグ終了",
+}
 
 
 def natural_filename_key(path: Path):
@@ -223,27 +229,44 @@ class CharacterEditorWindow(QDialog):
         self._rows, self._frame_scroll_areas = [], []
         animations = list(self.model.animations)
         configured = {animation.event_id for animation in animations}
+        by_event_id = {animation.event_id: animation for animation in animations}
+        required = [by_event_id[event_id] for event_id in REQUIRED_EVENT_IDS if event_id in by_event_id]
+        optional = [by_event_id[event_id] for event_id in OPTIONAL_EVENT_IDS if event_id in by_event_id]
+        unsupported = [animation for animation in animations if animation.event_id not in REQUIRED_EVENT_IDS + OPTIONAL_EVENT_IDS]
+        self._render_animation_rows(required)
+        optional_heading = QLabel("マウスイベント（任意）")
+        optional_heading.setAccessibleName("マウスイベント（任意）")
+        self.content_layout.addWidget(optional_heading)
         for event_id in OPTIONAL_EVENT_IDS:
             if event_id not in configured:
                 row = QFrame(); row.setFrameShape(QFrame.StyledPanel); box = QHBoxLayout(row)
-                box.addWidget(QLabel(f"{event_id}    optional    unconfigured")); box.addStretch()
-                configure = QPushButton("Configure"); configure.setAccessibleName(f"configure {event_id}")
+                box.addWidget(QLabel(f"{event_id} / {OPTIONAL_EVENT_LABELS[event_id]}    未設定")); box.addStretch()
+                configure = QPushButton("設定する"); configure.setAccessibleName(f"configure {event_id}")
                 configure.setEnabled(not self.recovery_mode)
                 configure.clicked.connect(lambda _, e=event_id: self.configure_optional_event(e))
                 box.addWidget(configure); row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 row.setMinimumHeight(row.sizeHint().height()); row.setMaximumHeight(row.minimumHeight())
                 self.content_layout.addWidget(row)
+        self._render_animation_rows(optional)
+        if unsupported:
+            heading = QLabel("未対応イベント")
+            heading.setAccessibleName("未対応イベント")
+            self.content_layout.addWidget(heading)
+            self._render_animation_rows(unsupported)
+        self.content_layout.addStretch()
+
+    def _render_animation_rows(self, animations):
         for animation in animations:
-            row = QFrame(); row.setFrameShape(QFrame.StyledPanel); box = QVBoxLayout(row); header = QHBoxLayout(); header.addWidget(QLabel(f"{animation.event_id}    {'必須' if animation.required else '任意'}    {animation.playback.value}    {len(animation.frames)} / 10"))
+            event_label = f"{animation.event_id} / {OPTIONAL_EVENT_LABELS[animation.event_id]}" if animation.event_id in OPTIONAL_EVENT_LABELS else animation.event_id
+            row = QFrame(); row.setFrameShape(QFrame.StyledPanel); box = QVBoxLayout(row); header = QHBoxLayout(); header.addWidget(QLabel(f"{event_label}    {'必須' if animation.required else '任意'}    {animation.playback.value}    {len(animation.frames)} / 10"))
             play, stop = QPushButton("▶ プレビュー"), QPushButton("■ 停止"); play.clicked.connect(lambda _, a=animation: self.start_preview(a)); stop.clicked.connect(self.stop_preview); header.addStretch(); header.addWidget(play); header.addWidget(stop); box.addLayout(header)
             if not animation.required:
-                remove_event = QPushButton("Remove event"); remove_event.setAccessibleName(f"remove {animation.event_id}")
+                remove_event = QPushButton("設定を削除"); remove_event.setAccessibleName(f"remove {animation.event_id}")
                 remove_event.setEnabled(not self.recovery_mode)
                 remove_event.clicked.connect(lambda _, a=animation: self.remove_optional_event(a))
                 header.addWidget(remove_event)
             strip = AnimationFrameStrip(self, animation); strip.rebuild(); box.addWidget(strip)
             row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed); row.setMinimumHeight(row.sizeHint().height()); row.setMaximumHeight(row.minimumHeight()); self.content_layout.addWidget(row); self._rows.append(row); self._frame_scroll_areas.append(strip)
-        self.content_layout.addStretch()
     def configure_optional_event(self, event_id):
         paths = self._select_pngs()
         if not paths: return False
@@ -256,7 +279,14 @@ class CharacterEditorWindow(QDialog):
         self.model.animations.append(EditableAnimation(event_id, False, PlaybackMode.ONCE, frames))
         self._set_dirty(True); self._render(); return True
     def remove_optional_event(self, animation):
-        if animation.required: return False
+        if self.recovery_mode or animation.required or animation.event_id in REQUIRED_EVENT_IDS:
+            return False
+        event_name = OPTIONAL_EVENT_LABELS.get(animation.event_id, animation.event_id)
+        if QMessageBox.question(
+            self, "WindowsPet", f"「{event_name}」のアニメーション設定を削除しますか？",
+            QMessageBox.Yes | QMessageBox.Cancel,
+        ) != QMessageBox.Yes:
+            return False
         self.model.animations.remove(animation); self._set_dirty(True); self._render(); return True
     def _card(self, strip, animation, frame, index):
         card = QFrame(); card.setFrameShape(QFrame.StyledPanel); card.setFixedWidth(150); card.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed); box = QVBoxLayout(card); box.setSizeConstraint(QLayout.SetMinimumSize)

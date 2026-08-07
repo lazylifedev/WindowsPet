@@ -44,10 +44,10 @@ class PetWindow(QWidget):
         self.resize(200, 200)
         self._drag_offset = None; self._press_position = None; self._dragged = False
         self._last_activity = QTimer(self); self._last_activity.setSingleShot(True); self._last_activity.timeout.connect(lambda: self.play("sleep"))
-        self._timer = QTimer(self); self._timer.setSingleShot(True); self._timer.timeout.connect(self._next_frame)
-        self._animation = None; self._frame = 0; self._animation_generation = 0
+        self._timer = QTimer(self); self._timer.setSingleShot(True)
+        self._frame_timeout_callback = None
+        self._animation = None; self._frame = 0; self._animation_generation = 0; self._dispatcher_generation = 0
         self.dispatcher = CharacterRuntimeEventDispatcher(animations, self._play_animation_now)
-        self._single_click_timer = QTimer(self); self._single_click_timer.setSingleShot(True); self._single_click_timer.timeout.connect(self._dispatch_single_click)
         self._suppress_next_single_release = False
         self._hover_timer = QTimer(self); self._hover_timer.setSingleShot(True); self._hover_timer.timeout.connect(self._trigger_hover_long)
         self._hover_triggered = False; self._last_hover_long_ms = -30000
@@ -85,14 +85,23 @@ class PetWindow(QWidget):
 
     def _play_animation_now(self, name: str, generation: int):
         self._animation_generation += 1
-        # The dispatcher generation identifies logical requests; the player keeps
-        # its historical monotonic token for stale Qt timer protection.
+        self._dispatcher_generation = generation
         self._animation, self._frame = self.animations[name], 0
-        self._timer.stop(); self._show_frame(); self._schedule_current_frame()
+        self._stop_frame_timer(); self._show_frame(); self._schedule_current_frame()
         if name != "sleep" and not self.input_bubble.isVisible() and not self.input_bubble.pending: self._last_activity.start(30000)
 
     def _show_frame(self): self.label.setPixmap(self._animation.frames[self._frame].pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-    def _schedule_current_frame(self): self._timer.start(self._animation.frames[self._frame].duration_ms)
+    def _stop_frame_timer(self):
+        self._timer.stop()
+        if self._frame_timeout_callback is not None:
+            self._timer.timeout.disconnect(self._frame_timeout_callback)
+            self._frame_timeout_callback = None
+
+    def _schedule_current_frame(self):
+        token = self._animation_generation
+        self._frame_timeout_callback = lambda token=token: self._next_frame(token)
+        self._timer.timeout.connect(self._frame_timeout_callback)
+        self._timer.start(self._animation.frames[self._frame].duration_ms)
     def visible_pet_rect(self):
         pixmap = self.label.pixmap()
         if pixmap is None or pixmap.isNull(): return self.frameGeometry()
@@ -104,11 +113,16 @@ class PetWindow(QWidget):
                     left, top, right, bottom = min(left, x), min(top, y), max(right, x), max(bottom, y)
         if right < left: return self.frameGeometry()
         return QRect(self.mapToGlobal(QPoint(left, top)), self.mapToGlobal(QPoint(right, bottom))).normalized()
-    def _next_frame(self):
+    def _next_frame(self, token=None):
+        if token is not None and token != self._animation_generation:
+            return
+        if self._frame_timeout_callback is not None:
+            self._timer.timeout.disconnect(self._frame_timeout_callback)
+            self._frame_timeout_callback = None
         self._frame += 1
         if self._frame >= len(self._animation.frames):
             if self._animation.playback.value == "once":
-                self.dispatcher.animation_completed(self._animation.event_id, self.dispatcher.generation)
+                self.dispatcher.animation_completed(self._animation.event_id, self._dispatcher_generation)
                 return
             self._frame = 0
         self._show_frame()
@@ -238,6 +252,8 @@ class PetWindow(QWidget):
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
             self._activity(); self._hover_timer.stop(); self._press_position = event.globalPosition().toPoint(); self._drag_offset = self._press_position - self.pos(); self._dragged = False
+        elif event.button() == Qt.RightButton:
+            self._hover_timer.stop()
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._drag_offset is not None and event.buttons() & Qt.LeftButton:
             current = event.globalPosition().toPoint(); started_drag = not self._dragged and (current - self._press_position).manhattanLength() >= self.DRAG_THRESHOLD; self._dragged = self._dragged or started_drag
@@ -247,7 +263,7 @@ class PetWindow(QWidget):
                 self.move(current - self._drag_offset)
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
-            dragged = self._dragged; self._drag_offset = None; self._press_position = None
+            dragged = self._dragged; self._dragged = False; self._drag_offset = None; self._press_position = None
             if dragged:
                 if not self.play("drag_end"): self.play("wave")
             elif self._suppress_next_single_release:
@@ -256,7 +272,7 @@ class PetWindow(QWidget):
                 self._dispatch_single_click()
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
-            self._single_click_timer.stop(); self._suppress_next_single_release = True; self.open_chat(); self.play("double_click")
+            self._suppress_next_single_release = True; self.open_chat(); self.play("double_click")
     def contextMenuEvent(self, event: QContextMenuEvent):
         self.play("right_click")
         menu = self._build_context_menu()
@@ -329,7 +345,7 @@ class PetWindow(QWidget):
             super().closeEvent(event)
             return
         self._shutdown_complete = True
-        self._hover_timer.stop(); self._single_click_timer.stop(); self._timer.stop()
+        self._hover_timer.stop(); self._stop_frame_timer()
         self.launch_controller.shutdown()
         self.input_bubble.close()
         if self.openai_settings_window is not None: self.openai_settings_window.shutdown()

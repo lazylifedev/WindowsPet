@@ -1,4 +1,11 @@
 from windows_pet.character_runtime_events import CharacterRuntimeEventDispatcher
+from pathlib import Path
+
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QEnterEvent, QMouseEvent
+
+from windows_pet.character_package_loader import load_builtin_default_character
+from windows_pet.main import PetWindow
 
 
 def _dispatcher(events=("idle", "thinking", "wave", "single_click", "double_click", "hover_long")):
@@ -37,3 +44,44 @@ def test_higher_persistent_state_preempts_transient_but_lower_state_waits():
     assert dispatcher.set_state("thinking")
     assert dispatcher.current_event == "thinking"
     assert not dispatcher.trigger("hover_long")
+
+
+def test_stale_frame_callback_cannot_advance_preempting_animation(tmp_path, qapp):
+    pet = PetWindow(load_builtin_default_character(Path("assets/animations")).animations, tmp_path / "position.json", quit_callback=lambda: None)
+    assert pet.play("wave")
+    stale_callback = pet._frame_timeout_callback
+    assert pet.play("thinking")
+    before = (pet._animation.event_id, pet._frame, pet.dispatcher.current_event, pet.dispatcher.generation)
+    stale_callback()
+    assert (pet._animation.event_id, pet._frame, pet.dispatcher.current_event, pet.dispatcher.generation) == before
+    pet.close()
+
+
+def test_once_completion_uses_start_generation_and_stale_completion_is_noop(tmp_path, qapp):
+    pet = PetWindow(load_builtin_default_character(Path("assets/animations")).animations, tmp_path / "position.json", quit_callback=lambda: None)
+    assert pet.play("wave")
+    callback = pet._frame_timeout_callback
+    pet.play("thinking")
+    callback()
+    assert pet.dispatcher.current_event == "thinking"
+    pet.play("wave")
+    pet._frame = len(pet._animation.frames) - 1
+    pet._next_frame(pet._animation_generation)
+    assert pet.dispatcher.current_event == pet.dispatcher.desired_state == "thinking"
+    pet.close()
+
+
+def test_hover_lifecycle_stops_for_right_click_and_resets_after_drag(tmp_path, qapp):
+    pet = PetWindow(load_builtin_default_character(Path("assets/animations")).animations, tmp_path / "position.json", quit_callback=lambda: None)
+    pet._pet_hovered = True; pet._hover_timer.start(2000)
+    point = QPointF(20, 20)
+    pet.mousePressEvent(QMouseEvent(QMouseEvent.Type.MouseButtonPress, point, point, point, Qt.RightButton, Qt.RightButton, Qt.NoModifier))
+    assert not pet._hover_timer.isActive()
+    pet.mousePressEvent(QMouseEvent(QMouseEvent.Type.MouseButtonPress, point, point, point, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+    moved = QPointF(40, 20)
+    pet.mouseMoveEvent(QMouseEvent(QMouseEvent.Type.MouseMove, moved, moved, moved, Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
+    pet.mouseReleaseEvent(QMouseEvent(QMouseEvent.Type.MouseButtonRelease, moved, moved, moved, Qt.LeftButton, Qt.NoButton, Qt.NoModifier))
+    assert not pet._dragged
+    pet.leaveEvent(QEvent(QEvent.Type.Leave)); pet.enterEvent(QEnterEvent(point, point, point))
+    assert pet._hover_timer.isActive()
+    pet.close()

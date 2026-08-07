@@ -4,7 +4,7 @@ from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
 from PySide6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QImage
 from PySide6.QtWidgets import QApplication, QFrame, QMessageBox, QPushButton, QSizePolicy
 
-from windows_pet.character_editor_model import EditableCharacter
+from windows_pet.character_editor_model import EditableAnimation, EditableCharacter
 from windows_pet.character_editor_window import (FRAME_MIME, CharacterEditorWindow,
                                                   calculate_insert_index, move_frame,
                                                   natural_filename_key, validate_batch_capacity)
@@ -59,6 +59,52 @@ def test_editor_renders_required_events_and_duration_controls(tmp_path, qapp):
     spins[0].setValue(300)
     assert editor.save_button.isEnabled()
     editor._set_dirty(False)
+    editor.close()
+
+
+def test_editor_orders_and_localizes_optional_events_without_dropping_unknown_events(tmp_path, qapp):
+    editor = CharacterEditorWindow(load_builtin_default_character(Path("assets/animations")), tmp_path / "working")
+    wave = next(animation for animation in editor.model.animations if animation.event_id == "wave")
+    editor.model.animations.append(EditableAnimation("legacy_event", False, wave.playback, list(wave.frames)))
+    editor._render()
+    labels = [label.text() for label in editor.findChildren(__import__("PySide6.QtWidgets", fromlist=["QLabel"]).QLabel)]
+    event_labels = [next(label for label in labels if label.startswith(event)) for event in ("idle", "sleep", "thinking", "wave")]
+    assert [labels.index(label) for label in event_labels] == sorted(labels.index(label) for label in event_labels)
+    heading_index = labels.index("マウスイベント（任意）")
+    assert all(labels.index(label) < heading_index for label in event_labels)
+    for event_id, name in (("single_click", "シングルクリック"), ("double_click", "ダブルクリック"), ("right_click", "右クリック"), ("hover_long", "長時間ホバー"), ("drag_start", "ドラッグ開始"), ("drag_end", "ドラッグ終了")):
+        assert any(label.startswith(f"{event_id} / {name}") and "未設定" in label for label in labels)
+    assert all(word not in "\n".join(labels) for word in ("Configure", "Remove event", "optional", "unconfigured"))
+    assert all(button.text() != "Configure" for button in editor.findChildren(QPushButton))
+    assert "未対応イベント" in labels and any(label.startswith("legacy_event") for label in labels)
+    editor.close()
+
+
+def test_remove_optional_event_requires_confirmation_and_preserves_working_disk(tmp_path, qapp, monkeypatch):
+    working = tmp_path / "working"
+    editor = CharacterEditorWindow(load_builtin_default_character(Path("assets/animations")), working)
+    source = tmp_path / "frame.png"; _png(source)
+    monkeypatch.setattr(editor, "_select_pngs", lambda: [source, source])
+    assert editor.configure_optional_event("single_click")
+    editor._set_dirty(False)
+    animation = next(item for item in editor.model.animations if item.event_id == "single_click")
+    manifest_before = (working / "manifest.json").read_bytes()
+    monkeypatch.setattr("windows_pet.character_editor_window.QMessageBox.question", lambda *args: QMessageBox.Cancel)
+    assert not editor.remove_optional_event(animation)
+    assert animation in editor.model.animations and not editor.dirty and (working / "manifest.json").read_bytes() == manifest_before
+    monkeypatch.setattr("windows_pet.character_editor_window.QMessageBox.question", lambda *args: QMessageBox.Yes)
+    assert editor.remove_optional_event(animation)
+    assert animation not in editor.model.animations and editor.dirty and (working / "manifest.json").read_bytes() == manifest_before
+    editor.close()
+
+
+def test_remove_optional_event_rejects_required_and_recovery_modes(tmp_path, qapp, monkeypatch):
+    editor = CharacterEditorWindow(load_builtin_default_character(Path("assets/animations")), tmp_path / "working")
+    required = next(item for item in editor.model.animations if item.event_id == "idle")
+    monkeypatch.setattr("windows_pet.character_editor_window.QMessageBox.question", lambda *args: (_ for _ in ()).throw(AssertionError("must not ask")))
+    assert not editor.remove_optional_event(required) and not editor.dirty
+    editor.recovery_mode = True
+    assert not editor.remove_optional_event(next(item for item in editor.model.animations if item.event_id == "wave")) and not editor.dirty
     editor.close()
 
 
