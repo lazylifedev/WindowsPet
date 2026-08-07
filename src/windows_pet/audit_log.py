@@ -23,6 +23,11 @@ class AuditEventType(str, Enum):
     GRANT_REJECTED = "grant_rejected"
     GRANT_EXPIRED = "grant_expired"
     GRANT_CANCELLED = "grant_cancelled"
+    EXECUTION_STARTED = "execution_started"
+    EXECUTION_SUCCEEDED = "execution_succeeded"
+    EXECUTION_FAILED = "execution_failed"
+    VERIFICATION_SUCCEEDED = "verification_succeeded"
+    VERIFICATION_FAILED = "verification_failed"
     AUDIT_WRITE_FAILED = "audit_write_failed"
 
 

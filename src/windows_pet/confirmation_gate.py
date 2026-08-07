@@ -8,6 +8,7 @@ from .action_models import ActionProposal, ConfirmationDecision, ConfirmationRes
 from .audit_log import AuditEvent
 from .execution_grant import ExecutionGrant, ExecutionGrantStore
 from .policy_gate import PolicyGate
+from .audit_log import NullAuditSink
 
 
 class SessionState(str, Enum):
@@ -54,7 +55,7 @@ class ConfirmationGate:
     """Owns the only grant-recording closure and serializes session decisions."""
     def __init__(self, policy=None, grants=None, audit=None, now=None, session_id_factory=None):
         self.policy = policy or PolicyGate()
-        self.audit = audit
+        self.audit = audit or NullAuditSink()
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.session_id_factory = session_id_factory or (lambda: secrets.token_urlsafe(18))
         self._sessions: dict[str, ConfirmationSession] = {}
@@ -109,5 +110,4 @@ class ConfirmationGate:
             return ConfirmationResult(True, ConfirmationResultCode.APPROVED, grant)
 
     def _audit(self, event_type, proposal, code, grant=None):
-        if self.audit:
-            self.audit.write(AuditEvent(event_type, code, task_id=proposal.task_id, proposal_id=proposal.proposal_id, proposal_fingerprint=proposal.fingerprint, grant_id=grant.grant_id if grant else "", tool_name=proposal.tool_name, tool_version=proposal.tool_version, operation=proposal.operation, side_effect=proposal.side_effect.value, confirmation_type=proposal.confirmation_type.value, requires_admin=proposal.requires_admin, reversible=proposal.reversible))
+        self.audit.write(AuditEvent(event_type, code, task_id=proposal.task_id, proposal_id=proposal.proposal_id, proposal_fingerprint=proposal.fingerprint, grant_id=grant.grant_id if grant else "", tool_name=proposal.tool_name, tool_version=proposal.tool_version, operation=proposal.operation, side_effect=proposal.side_effect.value, confirmation_type=proposal.confirmation_type.value, requires_admin=proposal.requires_admin, reversible=proposal.reversible))
