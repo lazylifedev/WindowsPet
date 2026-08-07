@@ -78,15 +78,18 @@ class ApplicationCandidateResolver:
                 continue
             try:
                 root = Path(location)
-                if root.is_symlink() or not root.is_dir():
+                if self.validator.is_reparse_point(root) or not root.is_dir():
                     continue
                 for current, directories, files in os.walk(root, followlinks=False):
                     if token.is_cancelled:
                         return []
+                    if self.validator.is_reparse_point(current):
+                        directories[:] = []
+                        continue
                     relative = Path(current).relative_to(root)
                     if len(relative.parts) >= 3:
                         directories[:] = []
-                    directories[:] = [name for name in directories if not (Path(current) / name).is_symlink()]
+                    directories[:] = [name for name in directories if not self.validator.is_reparse_point(Path(current) / name)]
                     for name in files:
                         if token.is_cancelled:
                             return []
@@ -94,7 +97,7 @@ class ApplicationCandidateResolver:
                         if inspected_entries > 200:
                             break
                         path = Path(current) / name
-                        if path.is_symlink() or path.suffix.casefold() != ".exe":
+                        if self.validator.is_reparse_point(path) or path.suffix.casefold() != ".exe":
                             continue
                         name_key = path.stem.casefold()
                         if query_key not in name_key and query_key not in app.display_name.casefold():

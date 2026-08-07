@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ntpath
+import os
 import subprocess
 import time
 from dataclasses import dataclass
@@ -43,7 +44,15 @@ class ApplicationLaunchValidator:
         self.exists = exists or (lambda p: Path(p).exists())
         self.is_file = is_file or (lambda p: Path(p).is_file())
         self.stat_path = stat_path or (lambda p: Path(p).stat())
-        self.is_reparse_point = is_reparse_point or (lambda p: Path(p).is_symlink())
+        self.is_reparse_point = is_reparse_point or self._is_reparse_point
+
+    @staticmethod
+    def _is_reparse_point(path) -> bool:
+        try:
+            stat = os.lstat(path)
+            return bool(getattr(stat, "st_file_attributes", 0) & 0x0400) or Path(path).is_symlink()
+        except OSError:
+            return False
 
     @staticmethod
     def _safe(raw: str) -> LaunchValidationCode | None:

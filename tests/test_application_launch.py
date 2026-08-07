@@ -85,3 +85,58 @@ def test_grant_rejection_and_cancellation_are_audited():
     result = gate.grants.consume_for(grant.grant_id, APPLICATION_LAUNCH_CONTRACT, proposal)
     assert result.reason.value == "cancelled"
     assert [event.event_type for event in audit.events][-2:] == ["grant_cancelled", "grant_rejected"]
+
+
+def test_expired_grant_writes_expired_then_rejected():
+    from dataclasses import replace
+    from datetime import timedelta
+    target, proposal, gate, grant, audit = approved_launch()
+    gate.grants._records[grant.grant_id].grant = replace(
+        gate.grants._records[grant.grant_id].grant,
+        expires_at=grant.issued_at - timedelta(seconds=1),
+    )
+    result = gate.grants.consume_for(grant.grant_id, APPLICATION_LAUNCH_CONTRACT, proposal)
+    assert result.reason.value == "expired"
+    events = audit.events[-2:]
+    assert [event.event_type for event in events] == ["grant_expired", "grant_rejected"]
+    assert [event.result_code for event in events] == ["expired", "expired"]
+
+
+def test_install_location_reparse_root_is_rejected(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from windows_pet.application_candidate_resolver import ApplicationCandidateResolver
+    from windows_pet.cancellation import CancellationToken
+
+    root = tmp_path / "Program Files" / "Example"; root.mkdir(parents=True)
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "Program Files"))
+    validator = SimpleNamespace(is_reparse_point=lambda path: Path(path) == root)
+    resolver = ApplicationCandidateResolver(validator=validator)
+    snapshot = SimpleNamespace(installed_apps=[SimpleNamespace(install_location=str(root), display_name="Example", version="", publisher="")])
+    assert resolver._install_location_candidates(snapshot, "Example", CancellationToken()) == []
+
+
+def test_install_location_reparse_child_is_not_walked(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from windows_pet.application_candidate_resolver import ApplicationCandidateResolver
+    from windows_pet.cancellation import CancellationToken
+
+    root = tmp_path / "Program Files" / "Example"; child = root / "redirect"; child.mkdir(parents=True)
+    (child / "Example.exe").write_text("fake")
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "Program Files"))
+    validator = SimpleNamespace(is_reparse_point=lambda path: Path(path) == child)
+    resolver = ApplicationCandidateResolver(validator=validator)
+    snapshot = SimpleNamespace(installed_apps=[SimpleNamespace(install_location=str(root), display_name="Example", version="", publisher="")])
+    assert resolver._install_location_candidates(snapshot, "Example", CancellationToken()) == []
+
+
+def test_install_location_reparse_executable_is_rejected(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from windows_pet.application_candidate_resolver import ApplicationCandidateResolver
+    from windows_pet.cancellation import CancellationToken
+
+    root = tmp_path / "Program Files" / "Example"; root.mkdir(parents=True); executable = root / "Example.exe"; executable.write_text("fake")
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "Program Files"))
+    validator = SimpleNamespace(is_reparse_point=lambda path: Path(path) == executable)
+    resolver = ApplicationCandidateResolver(validator=validator)
+    snapshot = SimpleNamespace(installed_apps=[SimpleNamespace(install_location=str(root), display_name="Example", version="", publisher="")])
+    assert resolver._install_location_candidates(snapshot, "Example", CancellationToken()) == []

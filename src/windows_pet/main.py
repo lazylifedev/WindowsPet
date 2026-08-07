@@ -45,7 +45,7 @@ class PetWindow(QWidget):
         self.local_inspection_window = None
         self.tray_icon = None; self.tray_menu = None
         self.input_bubble.search_completed.connect(self._on_search_completed)
-        self.input_bubble.application_launch_requested.connect(self.launch_controller.request)
+        self.input_bubble.application_launch_ready.connect(self.launch_controller.request)
         self.input_bubble.cancel_processing_requested.connect(self.cancel_current_processing)
         self.input_bubble.api_settings_requested.connect(self.open_openai_settings)
         self._pet_hovered = False; self._input_hovered = False; self._input_has_focus = False

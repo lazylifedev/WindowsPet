@@ -88,3 +88,59 @@ def test_controller_exposes_all_worker_factories_for_fake_integration():
     from windows_pet.chat_application_launch_controller import ChatApplicationLaunchController
     params = inspect.signature(ChatApplicationLaunchController).parameters
     assert {"resolver_worker_factory", "selection_dialog_factory", "confirmation_dialog_factory", "proposal_factory", "confirmation_gate", "executor", "launch_worker_factory", "thread_factory", "token_factory"} <= set(params)
+
+
+def test_controller_user_messages_are_japanese():
+    from windows_pet.chat_application_launch_controller import ChatApplicationLaunchController
+    from windows_pet.chat_bubble import InputBubble
+    import inspect
+    source = inspect.getsource(ChatApplicationLaunchController)
+    assert "Preparing application launch confirmation." not in source
+    assert "アプリの起動確認を準備しています。" in source
+    assert "アプリを起動できませんでした。" in source
+    assert "Cancelling…" not in inspect.getsource(InputBubble)
+
+
+def test_handoff_defers_single_ready_notification_until_thread_done(qapp):
+    from windows_pet.chat_bubble import InputBubble
+    from windows_pet.application_launch_request import ApplicationLaunchRequest
+
+    class Pet:
+        def play(self, _): pass
+
+    chat = InputBubble(Pet())
+    request = ApplicationLaunchRequest("Example", None)
+    received, statuses = [], []
+    chat._show_response_status = statuses.append
+    def start_controller(item):
+        received.append((item, chat._local_action_pending))
+        chat.show_local_action_status("アプリの起動確認を準備しています。")
+    chat.application_launch_ready.connect(start_controller)
+    chat._on_application_launch_requested(request)
+    assert received == []
+    chat._on_local_action_handed_off()
+    assert chat._local_action_pending and received == []
+    chat._thread_done()
+    qapp.processEvents()
+    assert received == [(request, True)]
+    assert statuses == ["アプリの起動確認を準備しています。"]
+    chat._emit_pending_application_launch_request()
+    assert received == [(request, True)]
+    chat.close()
+
+
+def test_handoff_failure_discards_saved_request(qapp):
+    from windows_pet.chat_bubble import InputBubble
+    from windows_pet.application_launch_request import ApplicationLaunchRequest
+
+    class Pet:
+        def play(self, _): pass
+
+    chat = InputBubble(Pet())
+    chat._on_application_launch_requested(ApplicationLaunchRequest("Example", None))
+    chat._on_failed("network", "failed")
+    chat._on_local_action_handed_off()
+    chat._thread_done()
+    qapp.processEvents()
+    assert chat._pending_application_launch_request is None
+    chat.close()

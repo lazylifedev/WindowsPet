@@ -74,7 +74,10 @@ class ExecutionGrantStore:
         return grant
 
     def _audit_rejection(self, code, grant_id="", proposal=None, contract=None):
-        self.audit.write(AuditEvent("grant_expired" if code is GrantResultCode.EXPIRED else "grant_rejected", result_code=code.value, grant_id=grant_id, proposal_id=getattr(proposal, "proposal_id", ""), proposal_fingerprint=getattr(proposal, "fingerprint", ""), tool_name=getattr(contract, "name", ""), tool_version=getattr(contract, "version", ""), operation=getattr(contract, "operation", ""), side_effect=getattr(getattr(contract, "side_effect", None), "value", "")))
+        fields = dict(result_code=code.value, grant_id=grant_id, proposal_id=getattr(proposal, "proposal_id", ""), proposal_fingerprint=getattr(proposal, "fingerprint", ""), tool_name=getattr(contract, "name", ""), tool_version=getattr(contract, "version", ""), operation=getattr(contract, "operation", ""), side_effect=getattr(getattr(contract, "side_effect", None), "value", ""))
+        if code is GrantResultCode.EXPIRED:
+            self.audit.write(AuditEvent("grant_expired", **fields))
+        self.audit.write(AuditEvent("grant_rejected", **fields))
 
     def consume_for(self, grant_id: str, contract: ToolContract, proposal: ActionProposal) -> GrantConsumeResult:
         with self._lock:
