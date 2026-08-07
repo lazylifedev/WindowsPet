@@ -1,7 +1,8 @@
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QFrame, QMessageBox, QPushButton, QSizePolicy
 
 from windows_pet.character_editor_model import EditableCharacter
 from windows_pet.character_editor_window import CharacterEditorWindow
@@ -122,3 +123,34 @@ def test_closing_editor_does_not_quit_application(tmp_path, qapp):
     editor.close()
     QApplication.processEvents()
     assert not calls
+
+
+def test_editor_frame_rows_keep_complete_cards_in_horizontal_only_scroll_areas(tmp_path, qapp):
+    editor = CharacterEditorWindow(load_builtin_default_character(Path("assets/animations")), tmp_path / "working")
+    editor.resize(1000, 700); editor.show(); QApplication.processEvents()
+    assert len(editor._rows) == 4
+    assert editor.preview.maximumHeight() <= 160
+    for row, horizontal in zip(editor._rows, editor._frame_scroll_areas):
+        cards = [child for child in horizontal.widget().findChildren(QFrame) if child.frameShape() == QFrame.StyledPanel]
+        assert cards
+        assert horizontal.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+        assert horizontal.horizontalScrollBarPolicy() == Qt.ScrollBarAsNeeded
+        assert horizontal.minimumHeight() >= max(card.sizeHint().height() for card in cards)
+        assert row.sizePolicy().verticalPolicy() == QSizePolicy.Fixed
+        assert row.minimumHeight() == row.maximumHeight()
+        assert all(card.minimumHeight() >= card.sizeHint().height() for card in cards)
+    assert editor.content.minimumHeight() >= sum(row.minimumHeight() for row in editor._rows)
+    assert editor.scroll.verticalScrollBarPolicy() != Qt.ScrollBarAlwaysOff
+    editor.close()
+
+
+def test_editor_add_and_delete_controls_preserve_frame_limits(tmp_path, qapp):
+    editor = CharacterEditorWindow(load_builtin_default_character(Path("assets/animations")), tmp_path / "working")
+    animation = editor.model.animations[0]
+    animation.frames = (animation.frames * 3)[:10]; editor._render()
+    add = next(button for button in editor._rows[0].findChildren(QPushButton) if button.accessibleName() == "画像を追加")
+    assert not add.isEnabled()
+    animation.frames = animation.frames[:2]; editor._render()
+    delete = next(button for button in editor._rows[0].findChildren(QPushButton) if button.accessibleName() == "フレームを削除")
+    assert not delete.isEnabled()
+    editor.close()

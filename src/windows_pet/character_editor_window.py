@@ -5,8 +5,9 @@ from uuid import uuid4
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import (QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox,
-                               QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QDialog, QFileDialog, QFrame, QHBoxLayout, QLayout, QLabel,
+                               QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
+                               QVBoxLayout, QWidget)
 
 from .character_editor_model import EditableCharacter, EditableFrame
 from .character_models import CharacterPackage, PlaybackMode
@@ -23,8 +24,8 @@ class CharacterEditorWindow(QDialog):
         self.preview_timer = QTimer(self); self.preview_timer.setSingleShot(True); self.preview_timer.timeout.connect(self._next_preview)
         self.preview_animation = None; self.preview_index = 0
         layout = QVBoxLayout(self); self.status = QLabel(); layout.addWidget(self.status)
-        self.preview = QLabel(); self.preview.setAlignment(Qt.AlignCenter); self.preview.setMinimumHeight(130); layout.addWidget(self.preview)
-        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.content = QWidget(); self.content_layout = QVBoxLayout(self.content); self.scroll.setWidget(self.content); layout.addWidget(self.scroll)
+        self.preview = QLabel(); self.preview.setAlignment(Qt.AlignCenter); self.preview.setFixedHeight(150); self.preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed); layout.addWidget(self.preview)
+        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.content = QWidget(); self.content_layout = QVBoxLayout(self.content); self.content_layout.setSizeConstraint(QLayout.SetMinimumSize); self.scroll.setWidget(self.content); layout.addWidget(self.scroll)
         actions = QHBoxLayout(); actions.addStretch(); self.rebuild_button = QPushButton("既定から作り直す"); self.rebuild_button.setVisible(False); self.reload_button = QPushButton("再読み込み"); self.cancel_button = QPushButton("キャンセル"); self.save_button = QPushButton("保存")
         actions.addWidget(self.rebuild_button); actions.addWidget(self.reload_button); actions.addWidget(self.cancel_button); actions.addWidget(self.save_button); layout.addLayout(actions)
         self.rebuild_button.clicked.connect(self.rebuild_from_builtin); self.reload_button.clicked.connect(self.reload); self.cancel_button.clicked.connect(self.close); self.save_button.clicked.connect(self.save)
@@ -52,21 +53,29 @@ class CharacterEditorWindow(QDialog):
     def _render(self):
         while self.content_layout.count():
             item = self.content_layout.takeAt(0); widget = item.widget(); widget and widget.deleteLater()
-        self._rows = []
+        self._rows = []; self._frame_scroll_areas = []
         for animation in self.model.animations:
             row = QFrame(); row.setFrameShape(QFrame.StyledPanel); box = QVBoxLayout(row); header = QHBoxLayout()
             header.addWidget(QLabel(f"{animation.event_id}    {'必須' if animation.required else '任意'}    {animation.playback.value}    {len(animation.frames)} / 10"))
             play = QPushButton("▶ プレビュー"); stop = QPushButton("■ 停止"); play.clicked.connect(lambda _, a=animation: self.start_preview(a)); stop.clicked.connect(self.stop_preview); header.addStretch(); header.addWidget(play); header.addWidget(stop); box.addLayout(header)
-            horizontal = QScrollArea(); horizontal.setWidgetResizable(True); holder = QWidget(); cards = QHBoxLayout(holder); cards.setAlignment(Qt.AlignLeft)
+            horizontal = QScrollArea(); horizontal.setWidgetResizable(False); horizontal.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff); horizontal.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            holder = QWidget(); cards = QHBoxLayout(holder); cards.setAlignment(Qt.AlignLeft); cards.setSizeConstraint(QLayout.SetMinimumSize)
             for index, frame in enumerate(animation.frames): cards.addWidget(self._card(animation, frame, index))
-            add = QPushButton("＋"); add.setAccessibleName("画像を追加"); add.setToolTip("PNG画像を追加"); add.setEnabled(len(animation.frames) < 10); add.clicked.connect(lambda _, a=animation: self.add_frame(a)); cards.addWidget(add); horizontal.setWidget(holder); box.addWidget(horizontal)
-            self.content_layout.addWidget(row); self._rows.append(row)
+            add = QPushButton("＋"); add.setAccessibleName("画像を追加"); add.setToolTip("PNG画像を追加"); add.setEnabled(len(animation.frames) < 10); add.setFixedSize(56, 56); add.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed); add.clicked.connect(lambda _, a=animation: self.add_frame(a)); cards.addWidget(add, alignment=Qt.AlignVCenter)
+            horizontal.setWidget(holder)
+            card_height = max((self._card_height(cards.itemAt(index).widget()) for index in range(len(animation.frames))), default=0)
+            horizontal.setMinimumHeight(card_height + horizontal.horizontalScrollBar().sizeHint().height() + horizontal.frameWidth() * 2)
+            horizontal.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed); box.addWidget(horizontal)
+            row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed); row.setMinimumHeight(row.sizeHint().height()); row.setMaximumHeight(row.minimumHeight())
+            self.content_layout.addWidget(row); self._rows.append(row); self._frame_scroll_areas.append(horizontal)
         self.content_layout.addStretch()
     def _card(self, animation, frame, index):
-        card = QFrame(); card.setFrameShape(QFrame.StyledPanel); box = QVBoxLayout(card); image = QLabel(); image.setAlignment(Qt.AlignCenter); image.setPixmap(frame.preview_pixmap.scaled(110, 110, Qt.KeepAspectRatio, Qt.SmoothTransformation)); box.addWidget(image); box.addWidget(QLabel(f"frame {index + 1}"))
+        card = QFrame(); card.setFrameShape(QFrame.StyledPanel); card.setFixedWidth(150); card.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed); box = QVBoxLayout(card); box.setSizeConstraint(QLayout.SetMinimumSize); image = QLabel(); image.setAlignment(Qt.AlignCenter); image.setFixedSize(110, 110); image.setPixmap(frame.preview_pixmap.scaled(110, 110, Qt.KeepAspectRatio, Qt.SmoothTransformation)); box.addWidget(image, alignment=Qt.AlignHCenter); box.addWidget(QLabel(f"frame {index + 1}"))
         duration = QSpinBox(); duration.setRange(50, 5000); duration.setSingleStep(50); duration.setSuffix(" ms"); duration.setValue(frame.duration_ms); duration.setAccessibleName(f"frame {index + 1} duration")
         duration.valueChanged.connect(lambda value, f=frame: self._duration(f, value)); box.addWidget(duration)
-        replace = QPushButton("差し替え"); replace.setAccessibleName("画像を差し替え"); replace.clicked.connect(lambda _, f=frame: self.replace_frame(f)); remove = QPushButton("削除"); remove.setAccessibleName("フレームを削除"); remove.setEnabled(len(animation.frames) > 2); remove.clicked.connect(lambda _, a=animation, f=frame: self.delete_frame(a, f)); box.addWidget(replace); box.addWidget(remove); return card
+        replace = QPushButton("差し替え"); replace.setAccessibleName("画像を差し替え"); replace.clicked.connect(lambda _, f=frame: self.replace_frame(f)); remove = QPushButton("削除"); remove.setAccessibleName("フレームを削除"); remove.setEnabled(len(animation.frames) > 2); remove.clicked.connect(lambda _, a=animation, f=frame: self.delete_frame(a, f)); box.addWidget(replace); box.addWidget(remove); card.setFixedHeight(card.sizeHint().height()); return card
+    @staticmethod
+    def _card_height(card): return card.sizeHint().height()
     def _duration(self, frame, value):
         if frame.duration_ms != value: frame.duration_ms = value; self._set_dirty(True)
     def _select_png(self):
