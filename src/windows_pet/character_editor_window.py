@@ -18,25 +18,37 @@ class CharacterEditorWindow(QDialog):
     def __init__(self, builtin: CharacterPackage, working_root: Path, parent=None):
         super().__init__(parent); self.setWindowTitle("キャラクターアニメーション設定"); self.resize(1000, 700); self.setMinimumSize(700, 500)
         self.builtin, self.working_root = builtin, Path(working_root); self.model = None; self.dirty = False; self._rows = []
+        self.recovery_mode = False
         self.session = self.working_root.parent / f".editor-session-{uuid4().hex}"; self.session.mkdir(parents=True, exist_ok=False)
         self.preview_timer = QTimer(self); self.preview_timer.setSingleShot(True); self.preview_timer.timeout.connect(self._next_preview)
         self.preview_animation = None; self.preview_index = 0
         layout = QVBoxLayout(self); self.status = QLabel(); layout.addWidget(self.status)
         self.preview = QLabel(); self.preview.setAlignment(Qt.AlignCenter); self.preview.setMinimumHeight(130); layout.addWidget(self.preview)
         self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.content = QWidget(); self.content_layout = QVBoxLayout(self.content); self.scroll.setWidget(self.content); layout.addWidget(self.scroll)
-        actions = QHBoxLayout(); actions.addStretch(); self.reload_button = QPushButton("再読み込み"); self.cancel_button = QPushButton("キャンセル"); self.save_button = QPushButton("保存")
-        actions.addWidget(self.reload_button); actions.addWidget(self.cancel_button); actions.addWidget(self.save_button); layout.addLayout(actions)
-        self.reload_button.clicked.connect(self.reload); self.cancel_button.clicked.connect(self.close); self.save_button.clicked.connect(self.save)
+        actions = QHBoxLayout(); actions.addStretch(); self.rebuild_button = QPushButton("既定から作り直す"); self.rebuild_button.setVisible(False); self.reload_button = QPushButton("再読み込み"); self.cancel_button = QPushButton("キャンセル"); self.save_button = QPushButton("保存")
+        actions.addWidget(self.rebuild_button); actions.addWidget(self.reload_button); actions.addWidget(self.cancel_button); actions.addWidget(self.save_button); layout.addLayout(actions)
+        self.rebuild_button.clicked.connect(self.rebuild_from_builtin); self.reload_button.clicked.connect(self.reload); self.cancel_button.clicked.connect(self.close); self.save_button.clicked.connect(self.save)
         self._load_initial()
 
     def _load_initial(self):
         try:
             package = load_character_package(self.working_root) if self.working_root.exists() else create_working_from_builtin(self.builtin, self.working_root)
         except Exception:
+            if self.working_root.exists():
+                self._show_builtin_fallback(); return
             self.status.setText("編集データを読み込めません"); self.save_button.setEnabled(False); return
+        self._show_package(package)
+
+    def _show_package(self, package):
+        self.recovery_mode = False; self.rebuild_button.setVisible(False)
         self.model = EditableCharacter.from_package(package); self._set_dirty(False); self._render()
 
-    def _set_dirty(self, value): self.dirty = value; self.save_button.setEnabled(value and self.model is not None)
+    def _show_builtin_fallback(self):
+        self.recovery_mode = True; self.rebuild_button.setVisible(True)
+        self.model = EditableCharacter.from_package(self.builtin); self._set_dirty(False); self._render()
+        self.status.setText("編集データを読み込めません。既定キャラクターを表示しています。")
+
+    def _set_dirty(self, value): self.dirty = value; self.save_button.setEnabled(value and self.model is not None and not self.recovery_mode)
     def _render(self):
         while self.content_layout.count():
             item = self.content_layout.takeAt(0); widget = item.widget(); widget and widget.deleteLater()
@@ -89,14 +101,23 @@ class CharacterEditorWindow(QDialog):
         self._show_preview()
     def stop_preview(self): self.preview_timer.stop(); self.preview_animation = None
     def save(self):
+        if self.recovery_mode: return
         try: package = save_working_package(self.model, self.working_root)
         except Exception: QMessageBox.warning(self, "WindowsPet", "保存できませんでした。\n現在の保存内容は変更されていません。"); return
-        self.model = EditableCharacter.from_package(package); self._set_dirty(False); self._render(); QMessageBox.information(self, "WindowsPet", "保存しました。")
+        self._show_package(package); QMessageBox.information(self, "WindowsPet", "保存しました。")
+    def rebuild_from_builtin(self):
+        if QMessageBox.question(self, "WindowsPet", "保存済みの編集データを破棄して、既定キャラクターから作り直しますか？", QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes: return
+        try:
+            create_working_from_builtin(self.builtin, self.working_root)
+            package = load_character_package(self.working_root)
+        except Exception:
+            self._show_builtin_fallback(); return
+        self._show_package(package)
     def reload(self):
         if self.dirty and QMessageBox.question(self, "WindowsPet", "未保存の変更を破棄して再読み込みしますか？", QMessageBox.Discard | QMessageBox.Cancel) != QMessageBox.Discard: return
         try: package = load_character_package(self.working_root)
-        except Exception: QMessageBox.warning(self, "WindowsPet", "保存済みデータを読み込めません。"); return
-        self.model = EditableCharacter.from_package(package); self._set_dirty(False); self._render()
+        except Exception: self._show_builtin_fallback(); return
+        self._show_package(package)
     def closeEvent(self, event):
         if self.dirty and QMessageBox.question(self, "WindowsPet", "変更内容を破棄しますか？", QMessageBox.Discard | QMessageBox.Cancel) != QMessageBox.Discard: event.ignore(); return
         self.stop_preview();
