@@ -91,6 +91,21 @@ def test_service_restart_execution_thread_emits_result_from_run():
     assert results[0].status is ServiceRestartStatus.CANCELLED
 
 
+def test_service_controller_maps_execution_and_verification_reasons_to_safe_messages():
+    execution = ChatServiceRestartController._message_for_outcome(
+        ServiceRestartOutcome(ServiceRestartStatus.FAILED, "nonzero_exit", 1)
+    )
+    verification = ChatServiceRestartController._message_for_outcome(
+        ServiceRestartOutcome(ServiceRestartStatus.VERIFICATION_FAILED, "service_not_running", 0, "service_not_running")
+    )
+    verification_timeout = ChatServiceRestartController._message_for_outcome(
+        ServiceRestartOutcome(ServiceRestartStatus.VERIFICATION_FAILED, "verification_timeout", 0, "verification_timeout")
+    )
+    assert execution == "サービスの再起動処理を実行できませんでした。"
+    assert verification == "再起動処理は実行しましたが、サービスが実行中であることを確認できませんでした。"
+    assert verification_timeout == "サービスの再起動後の確認がタイムアウトしました。"
+
+
 def test_service_controller_rejects_protected_before_confirmation(qapp, qtbot):
     done = []
     controller = ChatServiceRestartController(done.append, resolver=Resolver(ServiceResolutionCode.PROTECTED), dialog_factory=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("no dialog")))

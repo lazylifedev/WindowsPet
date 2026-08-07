@@ -22,7 +22,7 @@ class ActionConfirmationDialog(QDialog):
         layout = QVBoxLayout(self); layout.addWidget(QLabel(detail))
         if proposal.confirmation_type.value == "script_review":
             p = proposal.preview
-            layout.addWidget(QLabel(f"Purpose: {p.purpose}\nTarget: {p.target}\nSHA-256: {p.script_sha256_short}\nBackend: {p.backend}\nWorking directory: {p.working_directory_display}\nEnvironment: {p.environment_summary}\nExpected changes: {p.expected_changes}\nRequires admin: {p.requires_admin_display}\nTimeout: {p.timeout_display}\nVerification: {p.verification_plan}\nRollback: {p.rollback_plan or 'None'}"))
+            layout.addWidget(QLabel(f"目的: {p.purpose}\n対象: {p.target}\nSHA-256: {p.script_sha256_short}\n実行環境: {p.backend}\n作業ディレクトリ: {p.working_directory_display}\n環境変数: {p.environment_summary}\n想定される変更: {p.expected_changes}\n管理者権限: {p.requires_admin_display}\nタイムアウト: {p.timeout_display}\n実行後の確認: {p.verification_plan}\n元に戻す方法: {p.rollback_plan or 'なし'}"))
             script = QPlainTextEdit(p.script_text); script.setReadOnly(True); script.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap); script.setMinimumHeight(180); layout.addWidget(script)
         layout.addWidget(self.status)
         buttons = QHBoxLayout(); buttons.addWidget(self.cancel_button); buttons.addWidget(self.approve_button); layout.addLayout(buttons)

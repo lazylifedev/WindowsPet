@@ -10,7 +10,8 @@ from .audit_log import NullAuditSink
 from .confirmation_gate import ConfirmationGate
 from .service_restart import (RESTART_SERVICE_CONTRACT, ServiceIdentityResolver,
                               ServiceResolutionCode, ServiceRestartProposalFactory,
-                              ServiceRestartRunner, ServiceRestartStatus)
+                              ServiceRestartOutcome, ServiceRestartRunner,
+                              ServiceRestartStatus)
 
 
 class ServiceRestartResolutionThread(QThread):
@@ -63,7 +64,7 @@ class ServiceRestartExecutionThread(QThread):
                 self.grant_id, self.proposal, self.identity, self.cancel
             )
         except Exception:
-            outcome = type("Outcome", (), {"status": ServiceRestartStatus.FAILED})()
+            outcome = ServiceRestartOutcome(ServiceRestartStatus.FAILED, "unexpected_error")
         self.result_ready.emit(outcome)
 
 
@@ -192,13 +193,21 @@ class ChatServiceRestartController(QObject):
         outcome, self._execution_outcome = self._execution_outcome, None
         self._grant_id = None
         if outcome is not None:
-            messages = {
-                ServiceRestartStatus.SUCCEEDED: "サービスを再起動しました。",
-                ServiceRestartStatus.CANCELLED: "サービスの再起動をキャンセルしました。",
-                ServiceRestartStatus.TIMED_OUT: "サービスの再起動がタイムアウトしました。",
-                ServiceRestartStatus.VERIFICATION_FAILED: "再起動後の確認でサービスが Running ではなかったため、再起動は完了しませんでした。",
-            }
-            self._finish(messages.get(outcome.status, "サービスを再起動できませんでした。"))
+            self._finish(self._message_for_outcome(outcome))
+
+    @staticmethod
+    def _message_for_outcome(outcome):
+        if outcome.status is ServiceRestartStatus.SUCCEEDED:
+            return "サービスを再起動しました。"
+        if outcome.status is ServiceRestartStatus.CANCELLED:
+            return "サービスの再起動をキャンセルしました。"
+        if outcome.status is ServiceRestartStatus.TIMED_OUT:
+            return "サービスの再起動がタイムアウトしました。"
+        if outcome.result_code == "verification_timeout":
+            return "サービスの再起動後の確認がタイムアウトしました。"
+        if outcome.status is ServiceRestartStatus.VERIFICATION_FAILED:
+            return "再起動処理は実行しましたが、サービスが実行中であることを確認できませんでした。"
+        return "サービスの再起動処理を実行できませんでした。"
 
     def _finish(self, text):
         if self._busy:
