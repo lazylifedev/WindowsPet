@@ -53,6 +53,11 @@ class AuditEvent:
     requires_admin: bool = False
     reversible: bool = False
     timestamp: str = ""
+    script_sha256: str = ""
+    timeout_seconds: float | None = None
+    exit_code: int | None = None
+    verification_result: str = ""
+    item_count: int | None = None
 
     def __post_init__(self):
         if self.event_type not in {item.value for item in AuditEventType}:

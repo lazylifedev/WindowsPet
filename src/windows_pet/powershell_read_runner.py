@@ -59,7 +59,10 @@ class PowerShellReadRunner:
 
     def execute(self, request: WindowsInspectionRequest, cancel=None) -> PowerShellReadOutcome:
         def emit(event, **extra):
-            self.audit.write(AuditEvent(event, operation=request.area.value, result_code=extra.get("result_code", "ok")))
+            self.audit.write(AuditEvent(event, operation=request.area.value, result_code=extra.get("result_code", "ok"),
+                                        script_sha256=extra.get("script_sha256", ""), timeout_seconds=extra.get("timeout_seconds"),
+                                        exit_code=extra.get("exit_code"), verification_result=extra.get("verification_result", ""),
+                                        item_count=extra.get("item_count")))
         if cancel is not None and cancel.is_set():
             emit("powershell_read_cancelled", result_code="cancelled_before_start")
             return PowerShellReadOutcome(PowerShellReadStatus.CANCELLED, result_code="cancelled_before_start")
@@ -74,7 +77,7 @@ class PowerShellReadRunner:
         env = os.environ.copy()
         env["WINDOWSPET_PS_PARAMETERS"] = json.dumps({"query": request.query, "maxResults": request.max_results}, ensure_ascii=False, separators=(",", ":"))
         argv = [str(executable), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"]
-        emit("powershell_read_started")
+        emit("powershell_read_started", script_sha256=plan.script_sha256, timeout_seconds=plan.timeout_seconds)
         try:
             process = self.process_factory(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False,
                                            cwd=str(executable.parent), env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -102,12 +105,15 @@ class PowerShellReadRunner:
             emit("powershell_read_failed", result_code="output_limit_exceeded")
             return PowerShellReadOutcome(PowerShellReadStatus.FAILED, result_code="output_limit_exceeded")
         if process.returncode != 0 or stderr:
-            emit("powershell_read_failed", result_code="execution_failed")
+            emit("powershell_read_failed", result_code="execution_failed", script_sha256=plan.script_sha256,
+                 timeout_seconds=plan.timeout_seconds, exit_code=process.returncode, verification_result="not_run")
             return PowerShellReadOutcome(PowerShellReadStatus.FAILED, result_code="execution_failed")
         try:
             result = validate_result(json.loads(stdout.decode("utf-8")), request.area, request.max_results)
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
-            emit("powershell_read_invalid_output", result_code="invalid_output")
+            emit("powershell_read_invalid_output", result_code="invalid_output", script_sha256=plan.script_sha256,
+                 timeout_seconds=plan.timeout_seconds, exit_code=process.returncode, verification_result="failed")
             return PowerShellReadOutcome(PowerShellReadStatus.INVALID_OUTPUT, result_code="invalid_output")
-        emit("powershell_read_succeeded")
+        emit("powershell_read_succeeded", script_sha256=plan.script_sha256, timeout_seconds=plan.timeout_seconds,
+             exit_code=process.returncode, verification_result="passed", item_count=len(result["items"]))
         return PowerShellReadOutcome(PowerShellReadStatus.SUCCESS, result=result)
