@@ -36,7 +36,7 @@ class PetWindow(QWidget):
         self._animation = None; self._frame = 0
         self.input_bubble = InputBubble(self)
         self.audit_sink = audit_sink or JsonlAuditSink(position_path.parent / "audit.jsonl")
-        self.launch_controller = ChatApplicationLaunchController(self.input_bubble.complete_local_action, self, self.audit_sink)
+        self.launch_controller = ChatApplicationLaunchController(self.input_bubble.complete_local_action, self, self.audit_sink, show_status=self.input_bubble.show_local_action_status)
         self.search_store = SearchResultStore()
         self.search_settings_window = None
         self.search_results_window = None
@@ -257,7 +257,7 @@ class PetWindow(QWidget):
             self.search_results_window._populate()
         self.search_results_window.show(); self.search_results_window.raise_(); self.search_results_window.activateWindow()
     def cancel_current_processing(self):
-        if self.input_bubble.pending:
+        if self.input_bubble.pending and not self.launch_controller.is_busy:
             return self.input_bubble.cancel_current_request()
         if self.launch_controller.is_busy:
             self.launch_controller.cancel()

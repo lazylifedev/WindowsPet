@@ -77,3 +77,11 @@ def test_executor_maps_poll_failure_to_verification_failed():
     outcome = ApplicationLaunchExecutor(gate.grants, validator=FakeValidator(), process_factory=lambda *a, **k: PollFailure(), sleeper=lambda _: None, audit=audit).execute(grant.grant_id, proposal, target)
     assert outcome.status is ApplicationLaunchStatus.FAILED and outcome.result_code == "verification_failed"
     assert audit.events[-1].event_type == "verification_failed"
+
+
+def test_grant_rejection_and_cancellation_are_audited():
+    target, proposal, gate, grant, audit = approved_launch()
+    assert gate.grants.cancel(grant.grant_id).value == "cancelled"
+    result = gate.grants.consume_for(grant.grant_id, APPLICATION_LAUNCH_CONTRACT, proposal)
+    assert result.reason.value == "cancelled"
+    assert [event.event_type for event in audit.events][-2:] == ["grant_cancelled", "grant_rejected"]

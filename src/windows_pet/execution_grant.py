@@ -73,26 +73,30 @@ class ExecutionGrantStore:
             self._records[grant.grant_id] = _Record(grant)
         return grant
 
+    def _audit_rejection(self, code, grant_id="", proposal=None, contract=None):
+        self.audit.write(AuditEvent("grant_expired" if code is GrantResultCode.EXPIRED else "grant_rejected", result_code=code.value, grant_id=grant_id, proposal_id=getattr(proposal, "proposal_id", ""), proposal_fingerprint=getattr(proposal, "fingerprint", ""), tool_name=getattr(contract, "name", ""), tool_version=getattr(contract, "version", ""), operation=getattr(contract, "operation", ""), side_effect=getattr(getattr(contract, "side_effect", None), "value", "")))
+
     def consume_for(self, grant_id: str, contract: ToolContract, proposal: ActionProposal) -> GrantConsumeResult:
         with self._lock:
             record = self._records.get(grant_id)
-            if record is None: return GrantConsumeResult(False, GrantResultCode.NOT_FOUND)
-            if record.state is GrantState.CANCELLED: return GrantConsumeResult(False, GrantResultCode.CANCELLED)
-            if record.state is GrantState.CONSUMED: return GrantConsumeResult(False, GrantResultCode.ALREADY_USED)
-            if self.now() >= record.grant.expires_at:
-                record.state = GrantState.EXPIRED
-                return GrantConsumeResult(False, GrantResultCode.EXPIRED)
-            session = self.session_lookup(record.grant.confirmation_session_id)
-            if session is None: return GrantConsumeResult(False, GrantResultCode.SESSION_NOT_FOUND)
-            state = getattr(session, "state", None)
-            if getattr(state, "value", state) != "approved": return GrantConsumeResult(False, GrantResultCode.SESSION_NOT_APPROVED)
-            if session.proposal_id != record.grant.proposal_id or session.proposal_fingerprint != record.grant.proposal_fingerprint: return GrantConsumeResult(False, GrantResultCode.SESSION_MISMATCH)
-            if record.grant.proposal_id != proposal.proposal_id: return GrantConsumeResult(False, GrantResultCode.PROPOSAL_MISMATCH)
-            if record.grant.proposal_fingerprint != proposal.fingerprint or proposal.fingerprint != proposal_fingerprint(proposal): return GrantConsumeResult(False, GrantResultCode.FINGERPRINT_MISMATCH)
-            if self.policy.evaluate(contract, proposal).decision.value != "require_confirmation": return GrantConsumeResult(False, GrantResultCode.POLICY_DENIED)
-            record.state = GrantState.CONSUMED
-            self.audit.write(AuditEvent("grant_consumed", grant_id=grant_id, proposal_id=proposal.proposal_id, proposal_fingerprint=proposal.fingerprint, tool_name=contract.name, tool_version=contract.version, operation=contract.operation, side_effect=contract.side_effect.value))
-            return GrantConsumeResult(True, GrantResultCode.CONSUMED)
+            if record is None: result = GrantConsumeResult(False, GrantResultCode.NOT_FOUND)
+            elif record.state is GrantState.CANCELLED: result = GrantConsumeResult(False, GrantResultCode.CANCELLED)
+            elif record.state is GrantState.CONSUMED: result = GrantConsumeResult(False, GrantResultCode.ALREADY_USED)
+            elif self.now() >= record.grant.expires_at: record.state = GrantState.EXPIRED; result = GrantConsumeResult(False, GrantResultCode.EXPIRED)
+            else:
+                session = self.session_lookup(record.grant.confirmation_session_id)
+                if session is None: result = GrantConsumeResult(False, GrantResultCode.SESSION_NOT_FOUND)
+                elif getattr(getattr(session, "state", None), "value", getattr(session, "state", None)) != "approved": result = GrantConsumeResult(False, GrantResultCode.SESSION_NOT_APPROVED)
+                elif session.proposal_id != record.grant.proposal_id or session.proposal_fingerprint != record.grant.proposal_fingerprint: result = GrantConsumeResult(False, GrantResultCode.SESSION_MISMATCH)
+                elif record.grant.proposal_id != proposal.proposal_id: result = GrantConsumeResult(False, GrantResultCode.PROPOSAL_MISMATCH)
+                elif record.grant.proposal_fingerprint != proposal.fingerprint or proposal.fingerprint != proposal_fingerprint(proposal): result = GrantConsumeResult(False, GrantResultCode.FINGERPRINT_MISMATCH)
+                elif self.policy.evaluate(contract, proposal).decision.value != "require_confirmation": result = GrantConsumeResult(False, GrantResultCode.POLICY_DENIED)
+                else:
+                    record.state = GrantState.CONSUMED
+                    self.audit.write(AuditEvent("grant_consumed", grant_id=grant_id, proposal_id=proposal.proposal_id, proposal_fingerprint=proposal.fingerprint, tool_name=contract.name, tool_version=contract.version, operation=contract.operation, side_effect=contract.side_effect.value))
+                    return GrantConsumeResult(True, GrantResultCode.CONSUMED)
+            self._audit_rejection(result.reason, grant_id, proposal, contract)
+            return result
 
     def cancel(self, grant_id: str) -> GrantResultCode:
         with self._lock:
@@ -100,6 +104,7 @@ class ExecutionGrantStore:
             if record is None: return GrantResultCode.NOT_FOUND
             if record.state is GrantState.ACTIVE:
                 record.state = GrantState.CANCELLED
+                self.audit.write(AuditEvent("grant_cancelled", result_code=GrantResultCode.CANCELLED.value, grant_id=grant_id))
                 return GrantResultCode.CANCELLED
             return GrantResultCode.ALREADY_USED if record.state is GrantState.CONSUMED else GrantResultCode.EXPIRED
 

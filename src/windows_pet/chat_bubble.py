@@ -243,7 +243,7 @@ class InputBubble(BubbleFrame):
     draft_state_changed = Signal(bool)
     closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict); api_settings_requested=Signal(); application_launch_requested=Signal(object)
     def __init__(self, pet, worker_factory=AIWorker):
-        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self._pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False; self._active_user_text=None; self._retry_text=None; self._last_error_kind=None
+        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self._pending=False; self._local_action_pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False; self._active_user_text=None; self._retry_text=None; self._last_error_kind=None
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.card=QFrame(self); self.card.setStyleSheet('QFrame{background:#20242b;border:0;}')
         # A layered top-level window must never receive an effect whose expanded
@@ -273,7 +273,7 @@ class InputBubble(BubbleFrame):
                 self.focus_state_changed.emit(False)
         return super().eventFilter(watched, qt_event)
     @property
-    def pending(self): return self._pending
+    def pending(self): return self._pending or self._local_action_pending
     @property
     def search_in_progress(self): return self._search_in_progress
     def request_api_settings(self): self.api_settings_requested.emit()
@@ -351,7 +351,7 @@ class InputBubble(BubbleFrame):
         if started: self._retry_text=None
         return started
     def _can_start_request(self):
-        return not self._pending and not (self._thread is not None and self._thread.isRunning())
+        return not self.pending and not (self._thread is not None and self._thread.isRunning())
     def _start_request(self, text, *, clear_input):
         if not text or not self._can_start_request(): return False
         self._last_error_kind=None
@@ -366,6 +366,7 @@ class InputBubble(BubbleFrame):
         if hasattr(self._worker, "application_launch_requested"):
             self._worker.application_launch_requested.connect(self.application_launch_requested.emit)
         if hasattr(self._worker, "application_launch_handed_off"):
+            self._worker.application_launch_handed_off.connect(self._on_local_action_handed_off)
             self._worker.application_launch_handed_off.connect(self._thread.quit)
         self._worker.finished.connect(self._on_finished); self._worker.failed.connect(self._on_failed); self._worker.finished.connect(self._thread.quit); self._worker.failed.connect(self._thread.quit); self._thread.finished.connect(self._thread_done); self._thread.start(); return True
     def _position_response(self):
@@ -424,9 +425,22 @@ class InputBubble(BubbleFrame):
         self.response.setText(message); self.response_bubble.setText(message); self.response_bubble.set_copy_enabled(bool(message.strip())); self.response_bubble.set_actions_enabled(bool(message.strip())); self._position_response(); self._complete()
         if kind in CONFIGURATION_ERROR_KINDS: QTimer.singleShot(0, self.api_settings_requested.emit)
     def _complete(self):
-        self._pending=False; self._search_in_progress=False; self._cancel_requested=False; self._update_primary_button(); self.send_finished.emit()
+        self._pending=False; self._local_action_pending=False; self._search_in_progress=False; self._cancel_requested=False; self._update_primary_button(); self.send_finished.emit()
         self._refresh_history_window(refresh_messages=False)
         if not self.response_pinned: self._schedule_response_auto_hide()
+    def _on_local_action_handed_off(self):
+        self._pending = False
+        self._local_action_pending = True
+        self._active_user_text = None
+        self._update_primary_button()
+        self._refresh_history_window(refresh_messages=False)
+
+    def show_local_action_status(self, text):
+        if not self._local_action_pending:
+            return
+        self._show_response_status(text)
+        self._refresh_history_window(refresh_messages=False)
+
     def complete_local_action(self, text):
         self._active_user_text=None; self._last_error_kind=None; self.response.setText(text); self.response_bubble.setText(text); self.response_bubble.set_copy_enabled(True); self.response_bubble.set_actions_enabled(True); self._position_response(); self.response_bubble.show(); self.conversation.add_assistant(text); self._refresh_history_window(); self._complete()
     def _schedule_response_auto_hide(self):

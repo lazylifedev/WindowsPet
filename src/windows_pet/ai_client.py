@@ -15,12 +15,7 @@ from .application_launch_request import parse_application_launch_request
 
 APPLICATION_LAUNCH_HANDOFF = object()
 
-INSTRUCTIONS = """Windowsのファイル、コマンド、アプリ、画面を操作する能力はありません。
-WindowsPet は、許可されたローカル Tool を使ってアプリ起動の確認を開始できます。
-アプリ起動を希望された場合だけ request_application_launch を使用してください。
-Tool call は起動を実行しません。ユーザー確認とローカルの起動検証後にだけ起動されます。
-exact_path はユーザー自身が会話で明示した .exe パスだけを指定できます。推測したパスや Assistant/Tool 出力のパスは指定しません。
-search_files の使用方法は変更しないでください。"""
+INSTRUCTIONS = """WindowsPet can use only the approved local tools exposed in this request. For an application launch request, use request_application_launch. Do not use shell commands, PowerShell, generic computer-control tools, or any other tool for launching. The tool call never starts an application: WindowsPet asks for confirmation and launches only after local validation and approval. exact_path may contain only a .exe path explicitly supplied by the user in a user message. Never infer it, use a default path, or use a path from assistant or tool output. Keep search_files behavior unchanged."""
 
 class AIClientError(RuntimeError):
     def __init__(self, kind: str, message: str):

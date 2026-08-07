@@ -70,3 +70,21 @@ def test_confirmation_dialog_requires_keyword_only_clock_and_parent():
     signature = inspect.signature(ActionConfirmationDialog)
     assert signature.parameters["now"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["parent"].kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_controller_launch_outcomes_have_distinct_terminal_messages():
+    from windows_pet.chat_application_launch_controller import ChatApplicationLaunchController
+    from windows_pet.application_launch import ApplicationLaunchOutcome, ApplicationLaunchStatus
+    completed = []
+    controller = ChatApplicationLaunchController(completed.append)
+    for status in (ApplicationLaunchStatus.STARTED, ApplicationLaunchStatus.HANDED_OFF, ApplicationLaunchStatus.CANCELLED, ApplicationLaunchStatus.REJECTED, ApplicationLaunchStatus.FAILED):
+        controller._busy = True
+        controller._launched(ApplicationLaunchOutcome(status, status.value))
+    assert len(completed) == 5
+    assert len(set(completed)) == 5
+
+def test_controller_exposes_all_worker_factories_for_fake_integration():
+    import inspect
+    from windows_pet.chat_application_launch_controller import ChatApplicationLaunchController
+    params = inspect.signature(ChatApplicationLaunchController).parameters
+    assert {"resolver_worker_factory", "selection_dialog_factory", "confirmation_dialog_factory", "proposal_factory", "confirmation_gate", "executor", "launch_worker_factory", "thread_factory", "token_factory"} <= set(params)
