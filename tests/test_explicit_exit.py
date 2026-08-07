@@ -47,13 +47,19 @@ def test_auxiliary_windows_close_without_quitting_and_history_is_reusable(qapp, 
     for dialog in (
         OpenAISettingsWindow(pet),
         FileSearchSettingsWindow(parent=pet),
-        LocalInspectionWindow(parent=pet),
         SearchResultsWindow(SimpleNamespace(results=[]), pet),
     ):
         dialog.show()
         dialog.close()
         qapp.processEvents()
         assert not dialog.isVisible() and pet.isVisible() and not about_to_quit
+
+    # Showing this dialog starts a real local inspection.  Its close path is
+    # synchronous, so exercise it without showing the window in this fake-only test.
+    inspection = LocalInspectionWindow(parent=pet)
+    inspection.close()
+    qapp.processEvents()
+    assert not inspection.isVisible() and pet.isVisible() and not about_to_quit
 
     pet.show_help()
     pet.help_window.close()
