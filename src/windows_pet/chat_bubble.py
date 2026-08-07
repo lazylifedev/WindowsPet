@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import html
+import re
+
 from PySide6.QtCore import QEvent, QPoint, QRect, QThread, Qt, Signal, Slot, QTimer
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QTextDocument
 from PySide6.QtWidgets import (QDialog, QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
     QLabel, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget, QApplication, QTextBrowser, QMenu, QMessageBox)
 
@@ -14,6 +17,84 @@ TAIL_WIDTH, TAIL_HEIGHT = 14, 18
 SHADOW_BLUR, SHADOW_OFFSET_Y = 12, 3
 RESPONSE_GAP = 3
 CONFIGURATION_ERROR_KINDS = {"missing_key", "auth", "permission", "model"}
+
+# This is deliberately a small Markdown allowlist.  QTextDocument accepts a
+# useful subset of Markdown, but it can also interpret HTML and create linked
+# resources.  Escape HTML before handing the text to Qt, and remove the only
+# Markdown constructs that name a resource or destination.
+_MARKDOWN_IMAGE = re.compile(r"!\[([^\]]*)\]\([^\r\n)]*\)")
+_MARKDOWN_LINK = re.compile(r"(?<!!)\[([^\]]+)\]\([^\r\n)]*\)")
+_MARKDOWN_HEADING = re.compile(r"^( {0,3})#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?$")
+_MARKDOWN_CSS = """
+body { color: white; font-size: 13px; }
+h1, h2, h3, h4, h5, h6 { color: white; font-size: 15px; font-weight: bold; margin: 4px 0; }
+p { margin: 0 0 5px 0; }
+ul, ol { margin: 3px 0 5px 18px; padding: 0; }
+pre, code { background: #303641; color: white; font-family: Consolas, monospace; }
+pre { margin: 4px 0; white-space: pre-wrap; }
+a { color: white; text-decoration: none; }
+"""
+
+
+def sanitize_markdown(text: str) -> str:
+    """Return Markdown that cannot interpret HTML or name an external resource."""
+    text = "" if text is None else str(text)
+    # QTextDocument's Markdown headings use browser-sized fonts.  Preserve a
+    # heading's emphasis as normal-sized bold text, except inside fenced code.
+    in_fence = False
+    normalized_lines = []
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        ending = line[len(body):]
+        if re.match(r"^ {0,3}(`{3,}|~{3,})", body):
+            in_fence = not in_fence
+            normalized_lines.append(line)
+            continue
+        match = None if in_fence else _MARKDOWN_HEADING.match(body)
+        body = f"{match.group(1)}**{match.group(2)}**" if match else body
+        # Markdown treats a lone newline inside a paragraph as a space.  Make
+        # it an explicit break so AI answers retain their authored line breaks.
+        if not in_fence and ending and body.strip() and not body.endswith("  "):
+            body += "  "
+        normalized_lines.append(body + ending)
+    text = "".join(normalized_lines)
+    text = _MARKDOWN_IMAGE.sub(lambda match: match.group(1), text)
+    text = _MARKDOWN_LINK.sub(lambda match: match.group(1), text)
+    return html.escape(text, quote=False)
+
+
+class SafeMarkdownBrowser(QTextBrowser):
+    """A non-navigable QTextBrowser for untrusted assistant output.
+
+    Sanitizing is the primary defence.  The browser-level restrictions remain
+    intentionally redundant so future document changes cannot fetch or open a
+    resource accidentally.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setOpenLinks(False)
+        self.setOpenExternalLinks(False)
+        self.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.setUndoRedoEnabled(False)
+        self.document().setDefaultStyleSheet(_MARKDOWN_CSS)
+
+    def loadResource(self, resource_type, name):  # pragma: no cover - Qt calls this only for resources.
+        # Do not delegate to QTextBrowser: file, http(s), and every other URL
+        # are intentionally unavailable to assistant Markdown.
+        return None
+
+    def setSource(self, name):
+        # A QTextBrowser normally navigates when an anchor is activated.  Links
+        # are stripped, and this makes navigation a no-op even if one appears.
+        return None
+
+    def set_plain_text(self, text: str) -> None:
+        self.setPlainText("" if text is None else str(text))
+
+    def set_markdown_text(self, text: str) -> None:
+        self.document().setMarkdown(sanitize_markdown(text), QTextDocument.MarkdownDialectGitHub)
+        self.document().setDefaultStyleSheet(_MARKDOWN_CSS)
 
 def chat_position(pet_rect: QRect, available: QRect, size=(280, MIN_INPUT_HEIGHT)) -> QPoint:
     width, height = size
@@ -100,10 +181,7 @@ class BubbleFrame(QWidget):
 class ResponseBubble(BubbleFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.label = QTextBrowser(self)
-        self.label.setReadOnly(True)
-        self.label.setOpenExternalLinks(False)
-        self.label.setUndoRedoEnabled(False)
+        self.label = SafeMarkdownBrowser(self)
         self.label.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.label.setStyleSheet('QTextBrowser{color:white; background:transparent; border:0; padding:10px 14px;}')
         self.label.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -112,8 +190,21 @@ class ResponseBubble(BubbleFrame):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
     def setText(self, text):
+        """Compatibility API: callers that use setText keep plain-text display."""
+        self.set_plain_text(text)
+
+    def set_plain_text(self, text):
         self._text = text
-        self.label.setPlainText(text)
+        self.label.set_plain_text(text)
+        self._resize_for_document()
+
+    def set_markdown_text(self, text):
+        """Render a completed assistant response without changing its source text."""
+        self._text = text
+        self.label.set_markdown_text(text)
+        self._resize_for_document()
+
+    def _resize_for_document(self):
         document = self.label.document()
         document.setTextWidth(392)
         natural_width = max(62, min(392, int(document.idealWidth())))
@@ -206,7 +297,22 @@ class HistoryWindow(QDialog):
                 name = {'user': 'あなた', 'assistant': 'WindowsPet'}.get(role, 'メッセージ')
                 card = QFrame(); card.setObjectName('message-card'); card.setMaximumWidth(560); card.setStyleSheet('QFrame{background:%s; border-radius:10px; padding:8px;}' % ('#354b68' if role == 'user' else '#2b313b'))
                 card_layout = QVBoxLayout(card); title = QLabel(name); title.setStyleSheet('color:#b8c5d6; font-size:11px; font-weight:bold;')
-                text = QLabel(); text.setTextFormat(Qt.PlainText); text.setTextInteractionFlags(Qt.TextSelectableByMouse); text.setWordWrap(True); text.setText(message.get('content', '')); text.setMinimumHeight(24); text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum); text.setStyleSheet('QLabel{color:white; background:transparent; padding:0;}')
+                if role == 'assistant':
+                    text = SafeMarkdownBrowser()
+                    text.setObjectName('assistant-message')
+                    text.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                    text.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                    text.setStyleSheet('QTextBrowser{color:white; background:transparent; border:0; padding:0;}')
+                    text.set_markdown_text(message.get('content', ''))
+                    # The card is capped at 560px, with 16px of card padding.
+                    # Set a document width before asking for its height so the
+                    # outer conversation scroll area, rather than this widget,
+                    # owns long-message scrolling.
+                    text.document().setTextWidth(528)
+                    text.setMinimumHeight(max(24, int(text.document().size().height()) + 2))
+                else:
+                    text = QLabel(); text.setTextFormat(Qt.PlainText); text.setTextInteractionFlags(Qt.TextSelectableByMouse); text.setWordWrap(True); text.setText(message.get('content', '')); text.setMinimumHeight(24); text.setStyleSheet('QLabel{color:white; background:transparent; padding:0;}')
+                text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
                 card_layout.addWidget(title); card_layout.addWidget(text)
                 row_widget = QWidget(); row = QHBoxLayout(row_widget); row.setContentsMargins(0, 0, 0, 0)
                 if role == 'user': row.addStretch()
@@ -369,7 +475,7 @@ class InputBubble(BubbleFrame):
         self._reply_text=''; self._search_status_active=False; self.response_pinned=False; self._response_generation += 1
         if clear_input: self.input.clear()
         self._active_user_text=text
-        self.conversation.add_user(text); self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking'); self.response_bubble.setText('考え中…'); self._position_response(); self.response_bubble.show()
+        self.conversation.add_user(text); self._pending=True; self.send_button.setEnabled(False); self.send_started.emit(); self.pet.play('thinking'); self.response_bubble.set_plain_text('考え中…'); self._position_response(); self.response_bubble.show()
         self._refresh_history_window()
         self._thread=QThread(self); self._worker=self._worker_factory(self.conversation.messages()); self._worker.moveToThread(self._thread); self._update_primary_button()
         self._thread.started.connect(self._worker.run)
@@ -416,7 +522,7 @@ class InputBubble(BubbleFrame):
         r.move(position)
     def _show_response_status(self, text: str) -> None:
         self.response.setText(text)
-        self.response_bubble.setText(text)
+        self.response_bubble.set_plain_text(text)
         self.response_bubble.set_copy_enabled(False); self.response_bubble.set_actions_enabled(False)
         self._position_response()
         if self.pending:
@@ -438,14 +544,14 @@ class InputBubble(BubbleFrame):
     def _on_delta(self,text):
         if self._search_status_active:
             self._reply_text=''; self._search_status_active=False
-        self._reply_text+=text; self.response.setText(self._reply_text); self.response_bubble.setText(self._reply_text); self.response_bubble.set_copy_enabled(False); self.response_bubble.set_actions_enabled(False); self._position_response()
+        self._reply_text+=text; self.response.setText(self._reply_text); self.response_bubble.set_plain_text(self._reply_text); self.response_bubble.set_copy_enabled(False); self.response_bubble.set_actions_enabled(False); self._position_response()
     @Slot(str)
     def _on_finished(self,text):
         self._search_status_active=False
         self._retry_text=None
         self._active_user_text=None
         self._last_error_kind=None
-        self.response.setText(text); self.response_bubble.setText(text); self.response_bubble.set_copy_enabled(bool(text.strip())); self.response_bubble.set_actions_enabled(bool(text.strip())); self._position_response(); self.conversation.add_assistant(text)
+        self.response.setText(text); self.response_bubble.set_markdown_text(text); self.response_bubble.set_copy_enabled(bool(text.strip())); self.response_bubble.set_actions_enabled(bool(text.strip())); self._position_response(); self.conversation.add_assistant(text)
         self._refresh_history_window()
         if not text.strip(): self.response_bubble.hide()
         self._complete()
@@ -456,7 +562,7 @@ class InputBubble(BubbleFrame):
         if active is not None and self.conversation.remove_last_user(active): self._retry_text=active
         self._active_user_text=None
         self._last_error_kind=kind
-        self.response.setText(message); self.response_bubble.setText(message); self.response_bubble.set_copy_enabled(bool(message.strip())); self.response_bubble.set_actions_enabled(bool(message.strip())); self._position_response(); self._complete()
+        self.response.setText(message); self.response_bubble.set_plain_text(message); self.response_bubble.set_copy_enabled(bool(message.strip())); self.response_bubble.set_actions_enabled(bool(message.strip())); self._position_response(); self._complete()
         if kind in CONFIGURATION_ERROR_KINDS: QTimer.singleShot(0, self.api_settings_requested.emit)
     def _complete(self):
         self._pending=False; self._local_action_pending=False; self._search_in_progress=False; self._cancel_requested=False; self._update_primary_button(); self.send_finished.emit()
@@ -494,7 +600,7 @@ class InputBubble(BubbleFrame):
         self._refresh_history_window(refresh_messages=False)
 
     def complete_local_action(self, text):
-        self._active_user_text=None; self._last_error_kind=None; self.response.setText(text); self.response_bubble.setText(text); self.response_bubble.set_copy_enabled(True); self.response_bubble.set_actions_enabled(True); self._position_response(); self.response_bubble.show(); self.conversation.add_assistant(text); self._refresh_history_window(); self._complete()
+        self._active_user_text=None; self._last_error_kind=None; self.response.setText(text); self.response_bubble.set_plain_text(text); self.response_bubble.set_copy_enabled(True); self.response_bubble.set_actions_enabled(True); self._position_response(); self.response_bubble.show(); self.conversation.add_assistant(text); self._refresh_history_window(); self._complete()
     def _schedule_response_auto_hide(self):
         self._response_generation += 1
         generation = self._response_generation

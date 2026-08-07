@@ -5,10 +5,11 @@ from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QThread, Slot, qInstallMes
 from PySide6.QtGui import QEnterEvent, QFocusEvent, QKeyEvent, QPaintEvent
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtCore import QPointF, QObject, Signal
-from PySide6.QtWidgets import QWidget, QFrame
+from PySide6.QtWidgets import QApplication, QWidget, QFrame, QLabel
 
 from windows_pet.ai_client import AIClient, AIClientError, _error
-from windows_pet.chat_bubble import ChatBubble, HistoryWindow, MessageEdit, chat_position, response_position
+from windows_pet.chat_bubble import (ChatBubble, HistoryWindow, MessageEdit, ResponseBubble,
+                                     SafeMarkdownBrowser, chat_position, response_position)
 from windows_pet.main import PetWindow
 from windows_pet.animation import load_animations
 
@@ -328,6 +329,76 @@ def test_response_bubble_keeps_plain_text_and_scrolls_long_answers(qapp):
     assert chat.response_bubble.label.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
     assert chat.response_bubble.label.verticalScrollBarPolicy() == Qt.ScrollBarAsNeeded
     close_chat(chat, qapp)
+
+
+def test_completed_response_renders_safe_markdown_but_preserves_source_and_copy(qapp):
+    bubble = ResponseBubble()
+    source = "**太字** と *斜体* と `inline`\n- 箇条書き\n- 二つ目\n1. 番号\n2. 二番\n```\nprint('code')\n```"
+    bubble.set_markdown_text(source)
+    rendered_html = bubble.label.document().toHtml()
+    assert bubble.toPlainText() == source
+    assert "**" not in bubble.label.toPlainText()
+    assert "font-weight:700" in rendered_html and "font-style:italic" in rendered_html
+    assert "<ul" in rendered_html and "<ol" in rendered_html and "<pre" in rendered_html
+    bubble.set_copy_enabled(True)
+    QApplication.clipboard().setText("")
+    copy_action = next(action for action in bubble._build_context_menu().actions()
+                       if action.text() == "回答をコピー")
+    copy_action.trigger()
+    assert QApplication.clipboard().text() == source
+    bubble.close()
+
+
+def test_safe_markdown_rejects_html_links_and_all_resources(qapp):
+    class TrackingBrowser(SafeMarkdownBrowser):
+        def __init__(self):
+            super().__init__()
+            self.resource_requests = []
+
+        def loadResource(self, resource_type, name):
+            self.resource_requests.append(str(name))
+            return super().loadResource(resource_type, name)
+
+    browser = TrackingBrowser()
+    source = ("<b>危険</b>\n![x](https://example.invalid/a.png)\n"
+              "![local](file:///C:/secret.png)\n[リンク](https://example.invalid)")
+    browser.set_markdown_text(source)
+    rendered_html = browser.document().toHtml()
+    assert browser.toPlainText() == "<b>危険</b>\nx\nlocal\nリンク"
+    assert "&lt;b&gt;危険&lt;/b&gt;" in rendered_html
+    assert "src=" not in rendered_html and "href=" not in rendered_html
+    assert not browser.resource_requests
+    assert not browser.openLinks() and not browser.openExternalLinks()
+    assert not (browser.textInteractionFlags() & Qt.LinksAccessibleByMouse)
+    browser.close()
+
+
+def test_streaming_and_status_stay_plain_then_finished_becomes_markdown(qapp):
+    chat = make_chat(qapp)
+    chat._on_delta("**未完成")
+    assert chat.response_bubble.label.toPlainText() == "**未完成"
+    chat._show_response_status("**検索中**")
+    assert chat.response_bubble.label.toPlainText() == "**検索中**"
+    chat._on_finished("**完成**")
+    assert chat.response_bubble.toPlainText() == "**完成**"
+    assert chat.response_bubble.label.toPlainText() == "完成"
+    close_chat(chat, qapp)
+
+
+def test_history_renders_only_assistant_markdown_and_copies_raw_source(qapp):
+    chat = make_chat(qapp)
+    user_source, assistant_source = "**ユーザーはそのまま**", "**assistant**\n- item"
+    chat.conversation.add_user(user_source)
+    chat.conversation.add_assistant(assistant_source)
+    history = HistoryWindow(chat.conversation)
+    assistant = history.body.findChild(SafeMarkdownBrowser, "assistant-message")
+    user = next(label for label in history.body.findChildren(QLabel) if label.text() == user_source)
+    assert assistant is not None and assistant.toPlainText() == "assistant\nitem"
+    assert user.textFormat() == Qt.PlainText and user.text() == user_source
+    history.copy_conversation()
+    assert assistant_source in QApplication.clipboard().text()
+    assert user_source in QApplication.clipboard().text()
+    history.close(); close_chat(chat, qapp)
 
 
 def test_response_actions_pin_unpin_and_close_preserve_history(qapp):
