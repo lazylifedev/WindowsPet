@@ -98,8 +98,11 @@ APPLICATION_LAUNCH_CONTRACT = ToolContract("application_launcher", "1", "launch_
 
 
 class ApplicationLaunchProposalFactory:
+    def __init__(self, proposal_factory=None):
+        self.proposal_factory = proposal_factory or ActionProposalFactory()
+
     def create(self, task_id: str, candidate, target: ApplicationLaunchTarget) -> ActionProposal:
-        return ActionProposalFactory.create(APPLICATION_LAUNCH_CONTRACT, task_id,
+        return self.proposal_factory.create(APPLICATION_LAUNCH_CONTRACT, task_id,
             ActionTarget("local_application", target.canonical_path, target.display_name),
             {"file_size": target.file_size, "modified_time_ns": target.modified_time_ns, "arguments": []},
             SimpleActionPreview("アプリ起動", "選択したアプリを起動します", "起動"))
@@ -124,10 +127,21 @@ class ApplicationLaunchExecutor:
 
     def _valid_proposal(self, proposal, target) -> bool:
         if not isinstance(proposal, ActionProposal) or not isinstance(target, ApplicationLaunchTarget): return False
-        if proposal.tool_name != APPLICATION_LAUNCH_CONTRACT.tool_name or proposal.operation != APPLICATION_LAUNCH_CONTRACT.operation: return False
+        contract = APPLICATION_LAUNCH_CONTRACT
+        if (proposal.tool_name != contract.name or proposal.tool_version != contract.version or
+                proposal.operation != contract.operation or proposal.side_effect != contract.side_effect or
+                proposal.confirmation_type != contract.confirmation or proposal.reversible != contract.reversible or
+                proposal.requires_admin != contract.requires_admin or
+                proposal.cancellation_support != contract.cancellation_support or
+                proposal.timeout_seconds != contract.timeout_seconds or
+                proposal.verification_method != contract.verification_method or
+                proposal.audit_fields != contract.audit_fields): return False
+        if proposal.target.kind != "local_application": return False
         if proposal.target.identifier != target.canonical_path or proposal.target.display_name != target.display_name: return False
         params = proposal.parameters
-        return params.get("file_size") == target.file_size and params.get("modified_time_ns") == target.modified_time_ns and params.get("arguments", ()) in ((), [])
+        return (isinstance(params, Mapping) and params.get("file_size") == target.file_size and
+                params.get("modified_time_ns") == target.modified_time_ns and
+                params.get("arguments", ()) in ((), []))
 
     def execute(self, grant_id: str, proposal: ActionProposal, target: ApplicationLaunchTarget, token: CancellationToken | None = None) -> ApplicationLaunchOutcome:
         if not self._valid_proposal(proposal, target) or not self.validator.validate_target(target): return ApplicationLaunchOutcome(ApplicationLaunchStatus.REJECTED, "invalid_request")
@@ -140,11 +154,16 @@ class ApplicationLaunchExecutor:
         try:
             process = self.process_factory([target.canonical_path], shell=False, cwd=ntpath.dirname(target.canonical_path), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.sleeper(self.wait_seconds)
-            code = process.poll()
+            try: code = process.poll()
+            except Exception:
+                self.audit.write(AuditEvent("verification_failed", result_code="verification_failed", task_id=proposal.task_id, proposal_id=proposal.proposal_id, proposal_fingerprint=proposal.fingerprint, grant_id=grant_id, tool_name=proposal.tool_name, tool_version=proposal.tool_version, operation=proposal.operation, side_effect=proposal.side_effect.value, confirmation_type=proposal.confirmation_type.value))
+                return ApplicationLaunchOutcome(ApplicationLaunchStatus.FAILED, "verification_failed")
             if code is None: status, reason = ApplicationLaunchStatus.STARTED, "process_running"
             elif code == 0: status, reason = ApplicationLaunchStatus.HANDED_OFF, "process_handed_off"
             else: status, reason = ApplicationLaunchStatus.FAILED, "process_exited_nonzero"
         except OSError: status, reason = ApplicationLaunchStatus.FAILED, "process_create_failed"
+        verification = "verification_succeeded" if status in (ApplicationLaunchStatus.STARTED, ApplicationLaunchStatus.HANDED_OFF) else "verification_failed"
+        self.audit.write(AuditEvent(verification, result_code=reason, task_id=proposal.task_id, proposal_id=proposal.proposal_id, proposal_fingerprint=proposal.fingerprint, grant_id=grant_id, tool_name=proposal.tool_name, tool_version=proposal.tool_version, operation=proposal.operation, side_effect=proposal.side_effect.value, confirmation_type=proposal.confirmation_type.value))
         event = "execution_succeeded" if status in (ApplicationLaunchStatus.STARTED, ApplicationLaunchStatus.HANDED_OFF) else "execution_failed"
         self.audit.write(AuditEvent(event, result_code=reason, task_id=proposal.task_id, proposal_id=proposal.proposal_id, proposal_fingerprint=proposal.fingerprint, grant_id=grant_id, tool_name=proposal.tool_name, tool_version=proposal.tool_version, operation=proposal.operation, side_effect=proposal.side_effect.value, confirmation_type=proposal.confirmation_type.value))
         return ApplicationLaunchOutcome(status, reason)

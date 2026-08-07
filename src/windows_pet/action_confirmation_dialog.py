@@ -25,7 +25,9 @@ class ActionConfirmationDialog(QDialog):
 
     def _check_expiry(self):
         expired = self.now() >= min(self.session.expires_at, self.proposal.expires_at); self.approve_button.setEnabled(not expired and not self._decided)
-        if expired: self.status.setText("期限切れ")
+        if expired:
+            self.status.setText("期限切れ")
+            if not self._decided: self._finish(ConfirmationDecision.EXPIRED)
     def _finish(self, decision):
         if self._decided: return
         self._decided = True; self.response = ConfirmationResponse(decision, self.session.session_id, self.proposal.proposal_id, self.proposal.fingerprint); self.timer.stop()

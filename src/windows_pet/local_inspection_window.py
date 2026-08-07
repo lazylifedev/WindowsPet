@@ -13,9 +13,16 @@ from .local_inspection_worker import LocalInspectionWorker
 
 class LocalInspectionWindow(QDialog):
     """Read-only inspection UI with an explicit confirmation boundary for launching."""
-    def __init__(self, parent=None, service_factory=LocalInspectionService):
+    def __init__(self, parent=None, service_factory=LocalInspectionService, audit_sink=None,
+                 confirmation_gate_factory=ConfirmationGate, proposal_factory=ApplicationLaunchProposalFactory,
+                 validator_factory=ApplicationLaunchValidator, executor_factory=ApplicationLaunchExecutor,
+                 dialog_factory=ActionConfirmationDialog, launch_worker_factory=ApplicationLaunchWorker):
         super().__init__(parent); self.setWindowTitle("PC調査"); self.resize(620, 520)
-        self.service_factory = service_factory; self.thread = self.worker = self.token = None
+        self.service_factory = service_factory; self.audit_sink = audit_sink
+        self.confirmation_gate_factory = confirmation_gate_factory; self.proposal_factory = proposal_factory
+        self.validator_factory = validator_factory; self.executor_factory = executor_factory
+        self.dialog_factory = dialog_factory; self.launch_worker_factory = launch_worker_factory
+        self.thread = self.worker = self.token = None
         self.launch_thread = self.launch_worker = self.launch_token = None
         self.snapshot = None; self._launch_busy = False
         self.status = QLabel("未調査"); self.summary = QLabel(); self.selected_detail = QLabel("アプリを選択してください")
@@ -69,14 +76,17 @@ class LocalInspectionWindow(QDialog):
     def start_selected_application(self):
         if self._launch_busy: return
         item = self.results.currentItem(); candidate = item.data(Qt.ItemDataRole.UserRole) if item else None
-        target, code = ApplicationLaunchValidator().validate(candidate) if candidate else (None, None)
+        target, code = self.validator_factory().validate(candidate) if candidate else (None, None)
         if target is None: self.launch_status.setText(f"起動できません: {getattr(code, 'value', '未選択')}"); return
-        proposal = ApplicationLaunchProposalFactory().create("local-inspection-launch", candidate, target); gate = ConfirmationGate()
+        proposal = self.proposal_factory().create("local-inspection-launch", candidate, target)
+        gate = self.confirmation_gate_factory(audit=self.audit_sink) if self.audit_sink is not None else self.confirmation_gate_factory()
         decision, session = gate.prepare(APPLICATION_LAUNCH_CONTRACT, proposal)
         if session is None: self.launch_status.setText("起動がポリシーで拒否されました"); return
-        dialog = ActionConfirmationDialog(proposal, session, parent=self); dialog.exec(); result = gate.decide(APPLICATION_LAUNCH_CONTRACT, proposal, dialog.response)
+        dialog = self.dialog_factory(proposal, session, parent=self); dialog.exec(); result = gate.decide(APPLICATION_LAUNCH_CONTRACT, proposal, dialog.response)
         if not result.success or dialog.response.decision is not ConfirmationDecision.APPROVE: self.launch_status.setText(f"起動しません: {result.reason.value}"); return
-        self._launch_busy = True; self.launch_token = CancellationToken(); self.launch_thread = QThread(self); self.launch_worker = ApplicationLaunchWorker(ApplicationLaunchExecutor(gate.grants), result.grant.grant_id, proposal, target, self.launch_token); self.launch_worker.moveToThread(self.launch_thread)
+        self._launch_busy = True; self.launch_token = CancellationToken(); self.launch_thread = QThread(self)
+        executor = self.executor_factory(gate.grants, audit=self.audit_sink) if self.audit_sink is not None else self.executor_factory(gate.grants)
+        self.launch_worker = self.launch_worker_factory(executor, result.grant.grant_id, proposal, target, self.launch_token); self.launch_worker.moveToThread(self.launch_thread)
         self.launch_thread.started.connect(self.launch_worker.run); self.launch_worker.finished.connect(self._launch_finished); self.launch_worker.finished.connect(self.launch_thread.quit); self.launch_thread.finished.connect(self._launch_thread_finished); self.launch_thread.start(); self._selection_changed()
 
     def _launch_finished(self, outcome): self.launch_status.setText({ApplicationLaunchStatus.STARTED: "起動を開始しました", ApplicationLaunchStatus.HANDED_OFF: "起動処理を引き渡しました", ApplicationLaunchStatus.CANCELLED: "起動をキャンセルしました"}.get(outcome.status, "起動に失敗しました"))
