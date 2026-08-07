@@ -18,7 +18,7 @@ class ActionConfirmationDialog(QDialog):
         self.approve_button.setAutoDefault(False); self.approve_button.setDefault(False); self.cancel_button.setDefault(True)
         self.approve_button.clicked.connect(self.approve); self.cancel_button.clicked.connect(lambda: self._finish(ConfirmationDecision.CANCEL))
         detail = f"操作: {proposal.preview.operation}\n対象: {proposal.target.display_name}\n影響: {proposal.preview.impact}"
-        if proposal.target.kind == "local_application": detail += f"\nパス: {proposal.target.identifier}\n管理者権限: 不要\nコマンドライン引数: なし\n起動後にWindowsPetから自動終了しません"
+        if proposal.target.kind == "local_application": detail = f"アプリ名: {proposal.target.display_name}\n実行ファイル: {proposal.target.identifier}\n操作: アプリ起動\n影響: {proposal.preview.impact}\n管理者権限: 不要\nコマンドライン引数: なし\n起動後にWindowsPetから自動終了しません"
         layout = QVBoxLayout(self); layout.addWidget(QLabel(detail)); layout.addWidget(self.status)
         buttons = QHBoxLayout(); buttons.addWidget(self.cancel_button); buttons.addWidget(self.approve_button); layout.addLayout(buttons)
         self.cancel_button.setFocus(); self.timer = QTimer(self); self.timer.timeout.connect(self._check_expiry); self.timer.start(250); self._check_expiry()

@@ -19,6 +19,12 @@ def _norm(value: str) -> str:
     return unicodedata.normalize("NFKC", value.strip().strip('"'))
 
 
+def _application_key(value: str) -> str:
+    value = _norm(value).strip("'").casefold()
+    value = " ".join(value.split())
+    return value[:-4] if value.endswith(".exe") else value
+
+
 class LocalInspectionService:
     def __init__(self, env: dict[str, str] | None = None, exists: Callable[[str], bool] | None = None,
                  which: Callable[[str], str | None] | None = None, run_command=None):
@@ -123,10 +129,10 @@ class LocalInspectionService:
                 if suffix.strip().lower() in (".com", ".exe", ".bat", ".cmd")]
 
     def search(self, snapshot: InspectionSnapshot, query: str, limit: int = 25) -> list[AppCandidate]:
-        q = _norm(query).casefold()
+        q = _application_key(query)
         if not q or limit <= 0: return []
         path_match = self.which(q)
-        existing_names = {_norm(item.display_name).casefold() for item in snapshot.app_paths + snapshot.start_menu + snapshot.installed_apps}
+        existing_names = {_application_key(item.display_name) for item in snapshot.app_paths + snapshot.start_menu + snapshot.installed_apps}
         if path_match and q not in existing_names:
             path_candidate = AppCandidate(q, source="path", executable_name=q,
                                           executable_path=path_match, executable_exists=True)
@@ -141,10 +147,16 @@ class LocalInspectionService:
                 continue
             key = (_norm(candidate.display_name).casefold(), candidate.source, candidate.executable_name.casefold())
             unique.setdefault(key, candidate)
+        source_rank = {"app_paths_hklm_64": 0, "app_paths_hklm_32": 1, "app_paths_hkcu": 2,
+                       "install_location": 3, "path": 4, "installed_apps_hkcu": 5,
+                       "installed_apps_hklm_64": 6, "installed_apps_hklm_32": 7, "start_menu": 8}
         ranked = []
         for candidate in unique.values():
-            name = _norm(candidate.display_name).casefold()
-            rank = 0 if name == q else 1 if name.startswith(q) else 2 if q in name else 99
-            if rank < 99: ranked.append((rank, name, candidate))
-        ranked.sort(key=lambda item: (item[0], item[1]))
-        return [item[2] for item in ranked[:limit]]
+            name, stem = _application_key(candidate.display_name), _application_key(candidate.executable_name)
+            rank = (1 if name == q else 2 if stem == q else 3 if name.startswith(q) else
+                    4 if stem.startswith(q) else 5 if q in name else 6 if q in stem else 99)
+            if rank < 99:
+                path = str(candidate.executable_path)
+                ranked.append((rank, source_rank.get(candidate.source, 99), name, path.casefold(), candidate))
+        ranked.sort(key=lambda item: item[:-1])
+        return [item[-1] for item in ranked[:limit]]

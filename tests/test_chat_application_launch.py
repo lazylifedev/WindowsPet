@@ -72,6 +72,21 @@ def test_confirmation_dialog_requires_keyword_only_clock_and_parent():
     assert signature.parameters["parent"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
+def test_application_confirmation_uses_required_japanese_labels(qapp):
+    from windows_pet.action_confirmation_dialog import ActionConfirmationDialog
+    from windows_pet.application_launch import ApplicationLaunchProposalFactory, ApplicationLaunchTarget
+    from windows_pet.confirmation_gate import ConfirmationGate
+    from windows_pet.local_inspection_models import AppCandidate
+    candidate = AppCandidate("メモ帳", executable_path=r"C:\Windows\System32\notepad.exe", executable_exists=True)
+    target = ApplicationLaunchTarget(candidate.display_name, candidate.executable_path, 1, 1)
+    proposal = ApplicationLaunchProposalFactory().create("test", candidate, target)
+    _, session = ConfirmationGate().prepare(__import__("windows_pet.application_launch", fromlist=["APPLICATION_LAUNCH_CONTRACT"]).APPLICATION_LAUNCH_CONTRACT, proposal)
+    dialog = ActionConfirmationDialog(proposal, session)
+    text = dialog.layout().itemAt(0).widget().text()
+    assert "アプリ名: メモ帳" in text and "実行ファイル: C:\\Windows\\System32\\notepad.exe" in text and "操作: アプリ起動" in text
+    dialog.close()
+
+
 def test_controller_launch_outcomes_have_distinct_terminal_messages():
     from windows_pet.chat_application_launch_controller import ChatApplicationLaunchController
     from windows_pet.application_launch import ApplicationLaunchOutcome, ApplicationLaunchStatus

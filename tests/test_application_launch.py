@@ -140,3 +140,88 @@ def test_install_location_reparse_executable_is_rejected(tmp_path, monkeypatch):
     resolver = ApplicationCandidateResolver(validator=validator)
     snapshot = SimpleNamespace(installed_apps=[SimpleNamespace(install_location=str(root), display_name="Example", version="", publisher="")])
     assert resolver._install_location_candidates(snapshot, "Example", CancellationToken()) == []
+
+
+class _TrustedValidator:
+    is_reparse_point = staticmethod(lambda _path: False)
+    def validate(self, candidate):
+        return (object(), None) if candidate.executable_exists else (None, None)
+
+
+def _trusted_resolver(*, reparse=(), existing=True, canonical_target=None):
+    from windows_pet.application_candidate_resolver import ApplicationCandidateResolver
+    reparse = {str(item).casefold() for item in reparse}
+    root = r"C:\FakeWindows"
+    def resolve(path):
+        if path == r"C:\FakeWindows\System32\notepad.exe" and canonical_target is not None:
+            return canonical_target
+        return path
+    return ApplicationCandidateResolver(validator=_TrustedValidator(), windows_directory_resolver=lambda: root,
+        resolve_path=resolve, exists=lambda _path: existing, is_file=lambda path: str(path).casefold().endswith(".exe"),
+        is_reparse_point=lambda path: str(path).casefold() in reparse)
+
+
+def test_trusted_catalogue_resolves_notepad_aliases_and_normalizes_names():
+    from windows_pet.application_launch_request import ApplicationLaunchRequest
+    resolver = _trusted_resolver()
+    for name in ("メモ帳", "ノートパッド", "notepad", "notepad.exe", "  ＮＯＴＥＰＡＤ．ＥＸＥ  "):
+        outcome = resolver.resolve(ApplicationLaunchRequest(name, None))
+        assert outcome.status.value == "success"
+        assert outcome.candidates[0].executable_path == r"C:\FakeWindows\System32\notepad.exe"
+
+
+def test_trusted_catalogue_resolves_other_fixed_windows_apps():
+    from windows_pet.application_launch_request import ApplicationLaunchRequest
+    resolver = _trusted_resolver()
+    assert resolver.resolve(ApplicationLaunchRequest("電卓", None)).candidates[0].executable_path.endswith(r"System32\calc.exe")
+    assert resolver.resolve(ApplicationLaunchRequest("ペイント", None)).candidates[0].executable_path.endswith(r"System32\mspaint.exe")
+    assert resolver.resolve(ApplicationLaunchRequest("エクスプローラー", None)).candidates[0].executable_path == r"C:\FakeWindows\explorer.exe"
+
+
+def test_trusted_catalogue_rejects_missing_or_redirected_targets():
+    from windows_pet.application_launch_request import ApplicationLaunchRequest
+    from windows_pet.application_candidate_resolver import CandidateResolutionStatus
+    request = ApplicationLaunchRequest("メモ帳", None)
+    assert _trusted_resolver(existing=False).resolve(request).status is CandidateResolutionStatus.NOT_FOUND
+    assert _trusted_resolver(reparse=(r"C:\FakeWindows",)).resolve(request).status is CandidateResolutionStatus.NOT_FOUND
+    assert _trusted_resolver(reparse=(r"C:\FakeWindows\System32",)).resolve(request).status is CandidateResolutionStatus.NOT_FOUND
+    assert _trusted_resolver(reparse=(r"C:\FakeWindows\System32\notepad.exe",)).resolve(request).status is CandidateResolutionStatus.NOT_FOUND
+    assert _trusted_resolver(canonical_target=r"C:\Outside\notepad.exe").resolve(request).status is CandidateResolutionStatus.NOT_FOUND
+
+
+def test_trusted_catalogue_rejects_unc_device_and_does_not_guess_unknown_names():
+    from windows_pet.application_launch_request import ApplicationLaunchRequest
+    from windows_pet.application_candidate_resolver import ApplicationCandidateResolver, CandidateResolutionStatus
+    validator = _TrustedValidator()
+    for root in (r"\\server\windows", r"\\?\C:\Windows"):
+        resolver = ApplicationCandidateResolver(validator=validator, windows_directory_resolver=lambda root=root: root,
+            resolve_path=lambda path: path, exists=lambda _path: True, is_file=lambda _path: True,
+            is_reparse_point=lambda _path: False)
+        assert resolver.resolve(ApplicationLaunchRequest("メモ帳", None)).status is CandidateResolutionStatus.NOT_FOUND
+    assert _trusted_resolver()._trusted_windows_candidate("notepad-plus-plus") is None
+
+
+def test_generic_search_matches_executable_stem_and_uses_stable_ranking():
+    from windows_pet.local_inspection_models import InspectionSnapshot, SystemInfo, PathInspection, WingetStatus
+    from windows_pet.local_inspection_service import LocalInspectionService
+    snapshot = InspectionSnapshot(SystemInfo("", "", "", "", "", "", False, ""), PathInspection(0, 0, 0), WingetStatus(False),
+        app_paths=[AppCandidate("Zed", source="app_paths_hklm_64", executable_name="editor.exe", executable_path=r"C:\\Apps\\z.exe", executable_exists=True),
+                   AppCandidate("Editor Pro", source="app_paths_hkcu", executable_name="other.exe", executable_path=r"C:\\Apps\\a.exe", executable_exists=True)])
+    results = LocalInspectionService(which=lambda _name: None).search(snapshot, "editor")
+    assert [candidate.display_name for candidate in results] == ["Zed", "Editor Pro"]
+
+
+def test_trusted_catalogue_path_root_requires_a_local_drive_path():
+    from windows_pet.application_candidate_resolver import ApplicationCandidateResolver
+    for root in ("//server/windows", "//?/C:/Windows", r"\Windows"):
+        assert not ApplicationCandidateResolver._is_local_absolute(root)
+    assert ApplicationCandidateResolver._is_local_absolute(r"C:\Windows")
+
+
+def test_exact_path_resolution_remains_separate_from_catalogue():
+    from windows_pet.application_candidate_resolver import ApplicationCandidateResolver, CandidateResolutionStatus
+    from windows_pet.application_launch_request import ApplicationLaunchRequest
+    resolver = ApplicationCandidateResolver(validator=_TrustedValidator())
+    outcome = resolver.resolve(ApplicationLaunchRequest("Any label", r"C:\UserSelected\app.exe"))
+    assert outcome.status is CandidateResolutionStatus.SUCCESS
+    assert outcome.candidates[0].source == "user_path"
