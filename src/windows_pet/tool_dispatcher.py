@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from datetime import datetime
 from threading import Event
 
@@ -32,7 +33,7 @@ class ToolDispatcher:
         try: area = WindowsInspectionArea(data["area"])
         except (TypeError, ValueError) as exc: raise ValueError("inspect_windows の引数が不正です。") from exc
         query, maximum = data["query"], data["max_results"]
-        if (query is not None and (not isinstance(query, str) or len(query) > 100 or "\0" in query)) or type(maximum) is not int or not 1 <= maximum <= 100 or (area is WindowsInspectionArea.NETWORK and query is not None): raise ValueError("inspect_windows の引数が不正です。")
+        if (query is not None and (not isinstance(query, str) or len(query) > 100 or any(ch in query for ch in ("\0", "\r", "\n", "\t")) or any(unicodedata.category(ch) == "Cc" for ch in query))) or type(maximum) is not int or not 1 <= maximum <= 100 or (area is WindowsInspectionArea.NETWORK and query is not None): raise ValueError("inspect_windows の引数が不正です。")
         return WindowsInspectionRequest(area, query, maximum)
 
     @staticmethod

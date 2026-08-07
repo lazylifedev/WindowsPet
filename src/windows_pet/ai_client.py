@@ -12,7 +12,6 @@ from .file_search_settings import SearchSettings
 from .tool_dispatcher import ToolDispatcher
 from .openai_credentials import get_api_key
 from .application_launch_request import parse_application_launch_request
-from .powershell_read_builder import build_read_plan
 from .powershell_read_runner import PowerShellReadRunner
 
 APPLICATION_LAUNCH_HANDOFF = object()
@@ -115,7 +114,7 @@ class AIClient:
                     except ValueError as exc: raise AIClientError("tool", "invalid_inspection_request") from exc
                     seen.add(call_id); calls += 1
                     if on_powershell_started: on_powershell_started(request.area.value)
-                    outcome = self.inspection_runner.execute(request, build_read_plan(request), cancel)
+                    outcome = self.inspection_runner.execute(request, cancel)
                     if outcome.status.value == "cancelled": raise AIClientError("cancelled", "Windows調査をキャンセルしました。")
                     safe = dispatcher.safe_inspection_output(outcome, request.area.value)
                     if on_powershell_completed: on_powershell_completed(safe)
