@@ -937,14 +937,26 @@ The intended experience is:
 - Ask user permission before switching to casual/tameguchi speech.
 - Aim for different long-term personality/behavior per user while retaining a stable core personality.
 
+## 23. Current local implementation status
 
-## 23. Document governance
+- Habit Memory is implemented as a separate local domain under `src/windows_pet/habits/`. It accepts only structured event metadata, groups deterministic weekday/time buckets, requires multiple distinct dates, and consolidates bounded raw observations into habit records with confidence, strength, negative feedback and stale decay.
+- Proactive Speech foundation is implemented under `src/windows_pet/proactive/`. Candidate creation supports startup, time-of-day, explicit lunch memory, and idle return. `ShouldSpeakDecision` applies user setting, quiet hours, focus/critical-operation suppression, recent interaction, cooldown, daily cap and ignored-history penalties before phrase selection.
+- Proactive state stores only bounded category counters and timestamps. It does not persist generated speech bodies. Explicit negative feedback disables the category until a future explicit settings flow changes it.
+- Relationship and Personality foundation is implemented under `src/windows_pet/personality/`. Initial state is `FIRST_MEETING` with polite defaults; progression uses days, meaningful interactions, verified assistance, and feedback. Casual speech requires explicit permission, with `KEEP_POLITE` and `ASK_LATER` behavior enforced locally.
+- `ContextCompressor` exposes only bounded goal, recent task context, structured relevant memories, relationship style and safe evidence. It is a provider-facing structure, not a raw conversation archive.
+- Shared Knowledge client foundation is implemented under `src/windows_pet/shared_knowledge/`. The deterministic sanitizer rejects personal paths, private filenames, email, credentials, private IPs, internal details, conversations, schedules, preferences, habits, screenshots, documents and raw logs. Accepted records are abstract skills only.
+- Shared Knowledge is currently local SQLite/Fake only. Every cache match requires local revalidation; stale records cannot be revalidated. The local-only Global Brain client returns no remote data and cannot publish.
+- These foundations do not create Google Cloud resources, call the network, upload data, invoke an external LLM, or grant execution authority. Learned confidence remains subordinate to resolver, Policy, Confirmation, Grant, Verification and Audit boundaries.
+
+
+## 24. Document governance
 
 The canonical copy is `docs/WindowsPet_AI_Memory_Learning_Spec.md` in the `lazylifedev/WindowsPet` Git repository. Keep the filename stable; version through this document and Git history. ChatGPT Project shared storage should hold only a pointer memo to the Git source of truth.
 
-## 24. Revision history
+## 25. Revision history
 
 - **0.3 — 2026-08-08:** Added WindowsPet intelligence identity, Local-first Primary Brain, Luna/Terra/Sol cognitive-extension routing, local-PC-assisted intent inference, explicit Reflection pipeline, collective-intelligence privacy boundary, and Git-first documentation governance.
 - **0.4 — 2026-08-08:** Recorded the Phase 1 local deterministic launch routing and SQLite Skill store implementation boundary.
 - **0.5 — 2026-08-08:** Recorded the local Personal Memory Phase 2 and deterministic Reflection/Revalidation foundation boundaries.
 - **0.6 — 2026-08-08:** Recorded the local Research Orchestrator, Capability Registry, bounded Evidence/plan/re-plan flow, Local/Luna/Terra/Sol routing foundation, and optional structured LLM Reflection boundary. Real external providers remain unconnected.
+- **0.7 — 2026-08-08:** Recorded local Habit consolidation/forgetting, Proactive Speech anti-annoyance and reaction learning, gradual Personality/relationship and casual-speech permission, bounded context compression, and Shared Knowledge sanitizer/cache/revalidation foundations. No cloud transport or external upload was added.

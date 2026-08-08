@@ -42,6 +42,38 @@ def personal_memory_db_path() -> Path:
         return Path(location) / "personal_memory.sqlite3"
     return Path.home() / "WindowsPet" / "personal_memory.sqlite3"
 
+
+def habit_memory_db_path() -> Path:
+    """Return the separate local-only Habit Memory database path."""
+    location = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+    if location:
+        return Path(location) / "habit_memory.sqlite3"
+    return Path.home() / "WindowsPet" / "habit_memory.sqlite3"
+
+
+def proactive_state_db_path() -> Path:
+    """Return local proactive decision state; speech bodies are not stored."""
+    location = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+    if location:
+        return Path(location) / "proactive_state.sqlite3"
+    return Path.home() / "WindowsPet" / "proactive_state.sqlite3"
+
+
+def personality_db_path() -> Path:
+    """Return the local relationship and speech preference database path."""
+    location = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+    if location:
+        return Path(location) / "personality.sqlite3"
+    return Path.home() / "WindowsPet" / "personality.sqlite3"
+
+
+def shared_knowledge_cache_path() -> Path:
+    """Return the local shared-knowledge cache path; no transport is implied."""
+    location = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+    if location:
+        return Path(location) / "shared_knowledge.sqlite3"
+    return Path.home() / "WindowsPet" / "shared_knowledge.sqlite3"
+
 def assets_root() -> Path:
     return resource_path("assets/animations")
 

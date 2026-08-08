@@ -1,7 +1,7 @@
 # WindowsPet 設計仕様書
 
 **Subtitle:** PCに住み、ユーザーと共に考え、最強の情シスとして実作業で困りごとを解決するローカルAIパートナー\
-**Version:** 0.8.0\
+**Version:** 0.9.0\
 **Date:** 2026-08-08\
 **Audience:** ChatGPT / Codex / WindowsPet developers\
 **Status:** Research Orchestrator, bounded Model Routing, optional LLM Reflection interface, Phase 2 Personal Memory, deterministic Reflection/Revalidation foundation, Phase 3B, Phase 4A, Phase 4B, chat application launch, safe application discovery, and Local Intelligence Phase 1 are implemented with automated Fake/read-only validation. Real UAC, real Broker Restart-Service, external research, and real administrative changes remain intentionally unexecuted.
@@ -481,9 +481,14 @@ chat-serverは複数WindowsPetの**集合知（Global Brain / Shared Knowledge�
 - Model Routing foundation: Local/Luna/Terra/Solを決定論的に選ぶ `ModelRouter` を実装済み。既知のローカル解決は外部providerを呼ばず、Lunaを既定、Terra/Solは品質改善・予算・難度の条件が揃った場合だけ候補にする。Routingはconfirmation要件を緩和しない。
 - LLM Reflection interface: `DeterministicReflection` と `LLMReflectionProvider`／optional enrichment境界を追加。外部providerへ渡すのはbounded structured contextのみで、LLM結果はSkill promotion権限を持たない。Fake providerでnetwork 0を検証済み。
 - Qt lifecycle hardening: 親付きQThreadの`finished`通知と参照解放の順序を維持し、親QObjectによる破棄責任へ統一。修正後に別プロセスstress harnessを追加し、normal 100／cancel 50／shutdown 50を3プロセス連続で検証済み。`QThread.terminate`は使用していない。
+- Habit Memory foundation: `src/windows_pet/habits/` に structured observation、deterministic weekday/time-bucket detection、confidence threshold、consolidation、negative feedback、stale decay、raw observation の期限／件数 bounded cleanup を追加。Personal Memoryとは別SQLite domainで、raw conversation、path、credential、ログを受け付けない。
+- Proactive Speech foundation: `src/windows_pet/proactive/` に startup／time-of-day／known-lunch／idle-return candidate、`ShouldSpeakDecision`、quiet hours、focus／critical-operation suppression、cooldown、daily cap、ignore／dismiss／explicit-negative reaction learning、phrase family variationを追加。候補生成と発話決定を分離し、本文は保存しない。
+- Personality foundation: `src/windows_pet/personality/` に first-meetingからの段階的relationship state、speech preferences、casual-speech permission、bounded structured contextを追加。`KEEP_POLITE`は再質問せず、`ASK_LATER`だけcooldown後に再候補化する。ユーザーの攻撃的・依存的表現は人格適応へ取り込まない。
+- Shared Knowledge client foundation: `src/windows_pet/shared_knowledge/` に abstract skill record、deterministic sanitizer、global eligibility、local SQLite／Fake cache、stale判定、local revalidation interface、networkなしのGlobalBrain transport stubを追加。共有知識は実行権限を持たず、既存resolver／Policy／Confirmation／Grant／Verificationへの再検証を要求する。
+- Context compression foundation: goal、bounded recent task context、relevant structured memories、relationship style、safe evidenceだけを provider向けに組み立てる `ContextCompressor` を追加。会話全文、raw log、secret、個人pathの送信経路は追加していない。
 
-Implementation baseline: current Git `main` through the Research Orchestrator and Model Routing delivery.\
-Validation baseline: Fake/read-only discovery and local-learning tests pass; full acceptance is recorded in the delivery report for the current commit.
+Implementation baseline: current Git `main` through the local Habit, Proactive Speech, Personality, Context Compression, and Shared Knowledge client foundations.\
+Validation baseline: Fake/read-only discovery, local learning, deterministic habit/proactive/personality/shared-knowledge tests pass; full acceptance is recorded in the delivery report for the current commit.
 
 ### Current limitations
 
@@ -492,7 +497,8 @@ Validation baseline: Fake/read-only discovery and local-learning tests pass; ful
 - 実UAC、署名済みBroker、実管理者変更の手動確認は未実施。
 - UI／QThreadの製品フローを網羅する統合テストは不足している。
 - literal `DisplayIcon` と安全な `InstallLocation` から決定論的に候補化できない installed app は名前検索で見つからない場合がある。`UninstallString`/`QuietUninstallString` は意図的に利用しない。
-- Global Brain、chat-server sharing、Personal Memory cloud sync、cloud/global skill sharingは未実装。Local Skill DBは実行学習専用で会話全文を保存しない。Research providerはFake/Protocol境界までで、実Web／実OpenAI reflectionは未接続。
+- 実Global Brain／chat-server sharing／Personal Memory cloud syncは未接続。Shared Knowledgeはlocal sanitizer／cache／revalidation interfaceとnetworkなしFake境界までで、実共有は行わない。Local Skill DBは実行学習専用で会話全文を保存しない。Research providerはFake/Protocol境界までで、実Web／実OpenAI reflectionは未接続。
+- Habit／Proactive／Personalityの製品UIからの自動発話・設定画面統合は今後の課題。現在のfoundationはlocal service／SQLite／Fake clockテストで検証する。
 - File server、Teams connector、UI automation、自由形式のPowerShell Tool群は未実装。
 
 ## 16. Roadmap
@@ -504,12 +510,16 @@ Validation baseline: Fake/read-only discovery and local-learning tests pass; ful
 6. PowerShellExecutionProposal、Policy、確認画面、Executor、verification、auditの実装。
 7. 署名済みBrokerと実UAC／実Restart-Serviceの手動確認を、開発Fake経路と分離して実施する。
 8. 低リスクPowerShell Tool: process、service、network、event log、固定catalog registry read、winget name searchを実装済み。
-9. 変更系PowerShell Tool: service、startup、registry write、scheduled task、Windows settings、network/firewall/ACL。
-10. Reflection pipeline、local persistent memory、revalidation、Memory UI、API context compression、successful-procedure distillation（foundation実装済み、LLM enrichmentはoptional境界のみ）。
-11. Luna→Terra→Solのlatency/cost/confidence aware model routingと評価基盤（決定論的foundation実装済み、実provider接続は継続課題）。
-12. File server、Teams connector。
-13. chat-server shared knowledge、access control、provenance、conflict resolution、複数ペットの集合知。
-14. capability discovery、UI Automation拡張、rollback、update distribution、diagnostics、performance/cost optimization。
+9. Habit Memory／consolidation／forgetting foundation（local-only、deterministic、bounded cleanup）を実装済み。
+10. Proactive Speech／anti-annoyance／reaction learning foundationを実装済み。製品UIの自動発話統合は継続課題。
+11. Personality／relationship／casual permission／context compression foundationを実装済み。
+12. Shared Knowledge sanitizer／eligibility／local cache／revalidation foundationを実装済み。実Global Brain接続は未実装。
+13. 変更系PowerShell Tool: service、startup、registry write、scheduled task、Windows settings、network/firewall/ACL。
+14. Reflection pipeline、local persistent memory、revalidation、Memory UI、API context compression、successful-procedure distillation（foundation実装済み、LLM enrichmentはoptional境界のみ）。
+15. Luna→Terra→Solのlatency/cost/confidence aware model routingと評価基盤（決定論的foundation実装済み、実provider接続は継続課題）。
+16. File server、Teams connector。
+17. chat-server shared knowledge、access control、provenance、conflict resolution、複数ペットの集合知。
+18. capability discovery、UI Automation拡張、rollback、update distribution、diagnostics、performance/cost optimization。
 
 ## 17. MVP acceptance criteria
 
@@ -594,3 +604,4 @@ ChatGPTプロジェクト共有ストレージには仕様書本体の複製を�
 - **0.6.0 — 2026-08-08:** Recorded chat application launch handoff, read-only Start Menu and installed-app discovery, and Local Intelligence Phase 1 implementation boundaries.
 - **0.7.0 — 2026-08-08:** Added the local Personal Memory Phase 2 foundation, inspection/deletion UI, deterministic privacy/retention boundaries, Reflection metadata, verified Skill promotion, and abstract-target revalidation boundaries.
 - **0.8.0 — 2026-08-08:** Added the local Research Orchestrator foundation, Capability Registry, Evidence provenance/trust, CandidatePlan and bounded state machine, confirmation/re-plan boundaries, Fake providers, deterministic Local/Luna/Terra/Sol routing, and optional structured LLM Reflection interface. Real Web/OpenAI/Cloud/UAC/admin operations remain unexecuted.
+- **0.9.0 — 2026-08-08:** Added local Habit Memory consolidation/decay/forgetting, Proactive Speech anti-annoyance and reaction learning, gradual Personality/relationship and casual-speech permission, bounded context compression, and Shared Knowledge sanitizer/cache/revalidation interfaces. No cloud resource, network transport, external upload, UAC, or administrative change was added.
