@@ -130,7 +130,6 @@ class ChatServiceRestartController(QObject):
         )
         thread.result_ready.connect(self._resolved)
         thread.finished.connect(self._on_resolution_thread_finished)
-        thread.finished.connect(thread.deleteLater)
         thread.start()
         return True
 
@@ -187,7 +186,6 @@ class ChatServiceRestartController(QObject):
         )
         thread.result_ready.connect(self._finished)
         thread.finished.connect(self._on_execution_thread_finished)
-        thread.finished.connect(thread.deleteLater)
         thread.start()
 
     def _start_elevation(self, proposal, identity, grant):

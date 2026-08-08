@@ -44,6 +44,18 @@ def test_elevation_qthread_normal_completion_and_shutdown(qapp, tmp_path):
     assert controller.thread is None
 
 
+def test_elevation_shutdown_keeps_finished_thread_until_queued_cleanup(qapp, tmp_path):
+    request = _request()
+    broker = BrokerEntryPoint(envelope_root=tmp_path / "payloads", claims=OneShotClaimStore(tmp_path / "claims"))
+    client = ElevationBrokerClient(FakeElevationLauncher(broker), envelope_directory=tmp_path / "payloads")
+    controller = ElevationQtController(client)
+    assert controller.start(request, None, lambda _result: True)
+    controller.shutdown()
+    assert controller.thread is not None
+    qapp.processEvents()
+    assert controller.thread is None
+
+
 def test_elevation_qthread_cancel_and_repeated_shutdown_are_cooperative(qapp, tmp_path):
     for _ in range(10):
         request = _request()

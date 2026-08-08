@@ -45,14 +45,17 @@ class ElevationQtController(QObject):
         self._result = None
 
     def start(self, request, broker_path, verifier):
-        if self.thread is not None and self.thread.isRunning():
+        # A finished QThread can still have queued ``finished``/deleteLater
+        # delivery pending. Keep the strong reference until _finished clears
+        # it; replacing it early can leave Qt callbacks targeting a released
+        # wrapper during repeated controller creation.
+        if self.thread is not None:
             return False
         thread = self.thread = self.thread_factory(
             self.client, request, broker_path, verifier, parent=self
         )
         thread.result_ready.connect(self._received)
         thread.finished.connect(self._finished)
-        thread.finished.connect(thread.deleteLater)
         thread.start()
         return True
 
@@ -76,4 +79,5 @@ class ElevationQtController(QObject):
         thread = self.thread
         if thread is not None and thread.isRunning():
             thread.wait(timeout_ms)
-        self.thread = None
+        # Do not release a completed thread before its queued finished signal
+        # has run. _finished is the single reference-release point.
