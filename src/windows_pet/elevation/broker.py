@@ -7,6 +7,7 @@ import secrets
 import tempfile
 import threading
 import time
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -131,6 +132,23 @@ class BrokerEntryPoint:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.envelope_root = Path(envelope_root).resolve() if envelope_root else default_elevation_directory().resolve()
 
+    @classmethod
+    def production(cls, **kwargs):
+        """Explicit production construction; the normal default stays Fake-safe."""
+        from .executors import ElevatedRestartServiceExecutor
+        from .broker import ElevatedOperationDispatcher
+        kwargs["dispatcher"] = ElevatedOperationDispatcher({
+            "restart_service": ElevatedRestartServiceExecutor(),
+        })
+        return cls(**kwargs)
+
+    @staticmethod
+    def result_path_for_envelope(envelope_path: Path) -> Path:
+        path = Path(envelope_path)
+        if not path.is_absolute() or not re.fullmatch(r"envelope-[0-9a-f]{40}\.json", path.name):
+            raise ValueError("invalid_envelope_path")
+        return path.with_name(path.stem + ".result.json")
+
     def _result(self, envelope, status, code, started, *, exit_code=None, hint=""):
         return ElevationResult(
             request_id=envelope.request_id if envelope else "invalid-request",
@@ -150,6 +168,8 @@ class BrokerEntryPoint:
         started = self.clock()
         envelope = None
         try:
+            if result_path is not None and Path(result_path) != self.result_path_for_envelope(Path(envelope_path)):
+                raise ValueError("invalid_result_path")
             envelope, _ = read_envelope_file(Path(envelope_path), expected_sha256=expected_envelope_sha256, root=self.envelope_root)
             self.audit.write(AuditEvent("elevation_broker_started", request_id=envelope.request_id, proposal_id=envelope.proposal_id, proposal_fingerprint=envelope.proposal_fingerprint, grant_id=envelope.grant_id, operation=envelope.operation_id, template_id=envelope.template_id, template_version=envelope.template_version, script_sha256=envelope.script_sha256))
             try:
@@ -181,7 +201,7 @@ class BrokerEntryPoint:
                     self.audit.write(AuditEvent("elevation_cleanup_failed", result_code="cleanup_failed", request_id=envelope.request_id, grant_id=envelope.grant_id, operation=envelope.operation_id))
 
     @staticmethod
-    def write_result(result: ElevationResult, result_path: Path) -> None:
+    def write_result(result: ElevationResult, result_path: Path, *, root: Path | None = None) -> None:
         payload = {
             "request_id": result.request_id, "operation_id": result.operation_id,
             "status": result.status.value, "result_code": result.result_code,
@@ -193,6 +213,12 @@ class BrokerEntryPoint:
         if len(data) > MAX_ENVELOPE_BYTES:
             raise ValueError("result_too_large")
         path = Path(result_path)
+        if not path.is_absolute() or not re.fullmatch(r"envelope-[0-9a-f]{40}\.result\.json", path.name):
+            raise ValueError("invalid_result_path")
+        if path.is_symlink() or path.parent.is_symlink():
+            raise ValueError("invalid_result_path")
+        if root is not None and path.parent.resolve() != Path(root).resolve():
+            raise ValueError("result_path_boundary")
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         with os.fdopen(fd, "wb") as stream:
             stream.write(data); stream.flush(); os.fsync(stream.fileno())

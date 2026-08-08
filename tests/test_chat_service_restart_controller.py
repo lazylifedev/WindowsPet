@@ -6,6 +6,10 @@ from windows_pet.action_models import ConfirmationDecision, ConfirmationResponse
 from windows_pet.chat_service_restart_controller import (ChatServiceRestartController,
                                                           ServiceRestartExecutionThread,
                                                           ServiceRestartResolutionThread)
+from windows_pet.elevation import (BrokerEntryPoint, ElevationBrokerClient,
+                                   ElevatedOperationDispatcher,
+                                   FakeElevatedExecutor, FakeElevationLauncher,
+                                   OneShotClaimStore)
 from windows_pet.service_restart import (ServiceIdentity, ServiceResolutionCode,
                                          ServiceRestartOutcome, ServiceRestartStatus)
 from windows_pet.service_restart_request import ServiceRestartRequest
@@ -215,4 +219,134 @@ def test_service_restart_controller_shutdown_stress_50(qapp, qtbot):
         assert controller.request(ServiceRestartRequest("Spooler", SNAPSHOT))
         controller.shutdown()
         qtbot.waitUntil(lambda: controller.resolution_thread is None, timeout=3000)
+        assert not controller.is_busy
+
+
+def test_standard_user_admin_required_uses_one_shot_elevation_and_read_only_verification(qapp, qtbot, tmp_path):
+    class StandardResolver(Resolver):
+        def __init__(self): super().__init__(ServiceResolutionCode.ADMIN_REQUIRED)
+        def resolve(self, query, snapshot=None):
+            self.last_code = ServiceResolutionCode.ADMIN_REQUIRED
+            return ServiceIdentity("Spooler", "Print Spooler", "Running")
+        def validate(self, identity, snapshot=None):
+            return ServiceResolutionCode.ADMIN_REQUIRED
+        def read_only_identity(self, service_name):
+            return ServiceIdentity("Spooler", "Print Spooler", "Running")
+
+    payloads = tmp_path / "payloads"
+    elevated = FakeElevatedExecutor()
+    broker = BrokerEntryPoint(
+        dispatcher=ElevatedOperationDispatcher({"restart_service": elevated}),
+        claims=OneShotClaimStore(tmp_path / "claims"), envelope_root=payloads,
+    )
+    launcher = FakeElevationLauncher(broker)
+    client = ElevationBrokerClient(launcher, envelope_directory=payloads)
+    direct_calls = []
+    class DirectExecutor:
+        def execute(self, *args):
+            direct_calls.append(args)
+            return ServiceRestartOutcome(ServiceRestartStatus.SUCCEEDED, "ok")
+    done = []
+    controller = ChatServiceRestartController(
+        done.append, resolver=StandardResolver(), executor=DirectExecutor(),
+        dialog_factory=ApproveDialog, elevation_client=client,
+        broker_path_resolver=lambda: tmp_path / "WindowsPet.ElevationBroker.exe",
+    )
+    assert controller.request(ServiceRestartRequest("Spooler", SNAPSHOT))
+    qtbot.waitUntil(lambda: bool(done), timeout=3000)
+    qtbot.waitUntil(lambda: not controller.is_busy, timeout=3000)
+    assert done == ["サービスを再起動しました。"]
+    assert launcher.launch_count == 1 and elevated.execution_count == 1
+    assert direct_calls == []
+    controller.shutdown()
+
+
+def test_standard_user_cancel_never_launches_elevation(qapp, qtbot, tmp_path):
+    launcher = FakeElevationLauncher()
+    client = ElevationBrokerClient(launcher, envelope_directory=tmp_path / "payloads")
+    class StandardResolver(Resolver):
+        def __init__(self): super().__init__(ServiceResolutionCode.ADMIN_REQUIRED)
+        def resolve(self, query, snapshot=None):
+            self.last_code = ServiceResolutionCode.ADMIN_REQUIRED
+            return ServiceIdentity("Spooler", "Print Spooler", "Running")
+        def validate(self, identity, snapshot=None):
+            return ServiceResolutionCode.ADMIN_REQUIRED
+    done = []
+    controller = ChatServiceRestartController(
+        done.append, resolver=StandardResolver(), dialog_factory=RejectDialog,
+        elevation_client=client, broker_path_resolver=lambda: tmp_path / "broker.exe",
+    )
+    assert controller.request(ServiceRestartRequest("Spooler", SNAPSHOT))
+    qtbot.waitUntil(lambda: bool(done), timeout=3000)
+    assert launcher.launch_count == 0
+    controller.shutdown()
+
+
+def test_standard_user_missing_broker_fails_closed_before_elevation(qapp, qtbot, tmp_path):
+    launcher = FakeElevationLauncher()
+    client = ElevationBrokerClient(launcher, envelope_directory=tmp_path / "payloads")
+    class StandardResolver(Resolver):
+        def __init__(self): super().__init__(ServiceResolutionCode.ADMIN_REQUIRED)
+        def resolve(self, query, snapshot=None):
+            self.last_code = ServiceResolutionCode.ADMIN_REQUIRED
+            return ServiceIdentity("Spooler", "Print Spooler", "Running")
+        def validate(self, identity, snapshot=None):
+            return ServiceResolutionCode.ADMIN_REQUIRED
+    done = []
+    controller = ChatServiceRestartController(
+        done.append, resolver=StandardResolver(), dialog_factory=ApproveDialog,
+        elevation_client=client, broker_path_resolver=lambda: (_ for _ in ()).throw(ValueError("missing")),
+    )
+    assert controller.request(ServiceRestartRequest("Spooler", SNAPSHOT))
+    qtbot.waitUntil(lambda: bool(done), timeout=3000)
+    assert launcher.launch_count == 0
+    controller.shutdown()
+
+
+def test_service_restart_elevation_integration_stress_normal_100_cancel_50_shutdown_50(qapp, qtbot, tmp_path):
+    class StandardResolver(Resolver):
+        def __init__(self): super().__init__(ServiceResolutionCode.ADMIN_REQUIRED)
+        def resolve(self, query, snapshot=None):
+            self.last_code = ServiceResolutionCode.ADMIN_REQUIRED
+            return ServiceIdentity("Spooler", "Print Spooler", "Running")
+        def validate(self, identity, snapshot=None):
+            return ServiceResolutionCode.ADMIN_REQUIRED
+        def read_only_identity(self, service_name):
+            return ServiceIdentity("Spooler", "Print Spooler", "Running")
+
+    def make_controller(base, *, uac_cancelled=False):
+        payloads = base / "payloads"
+        broker = BrokerEntryPoint(
+            dispatcher=ElevatedOperationDispatcher({"restart_service": FakeElevatedExecutor()}),
+            claims=OneShotClaimStore(base / "claims"), envelope_root=payloads,
+        )
+        launcher = FakeElevationLauncher(broker, uac_cancelled=uac_cancelled)
+        client = ElevationBrokerClient(launcher, envelope_directory=payloads)
+        controller = ChatServiceRestartController(
+            lambda _text: None, resolver=StandardResolver(), dialog_factory=ApproveDialog,
+            elevation_client=client, broker_path_resolver=lambda: base / "WindowsPet.ElevationBroker.exe",
+        )
+        return controller, launcher
+
+    for index in range(100):
+        controller, launcher = make_controller(tmp_path / f"normal-{index}")
+        done = []
+        controller.complete = done.append
+        assert controller.request(ServiceRestartRequest("Spooler", SNAPSHOT))
+        qtbot.waitUntil(lambda: bool(done), timeout=3000)
+        assert launcher.launch_count == 1 and done == ["サービスを再起動しました。"]
+        controller.shutdown()
+    for index in range(50):
+        controller, launcher = make_controller(tmp_path / f"cancel-{index}", uac_cancelled=True)
+        done = []
+        controller.complete = done.append
+        assert controller.request(ServiceRestartRequest("Spooler", SNAPSHOT))
+        qtbot.waitUntil(lambda: bool(done), timeout=3000)
+        assert launcher.launch_count == 0
+        controller.shutdown()
+    for index in range(50):
+        controller, _launcher = make_controller(tmp_path / f"shutdown-{index}", uac_cancelled=True)
+        assert controller.request(ServiceRestartRequest("Spooler", SNAPSHOT))
+        controller.shutdown()
+        qtbot.waitUntil(lambda: controller.elevation_controller.thread is None, timeout=3000)
         assert not controller.is_busy

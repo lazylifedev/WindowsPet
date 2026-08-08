@@ -8,7 +8,11 @@ from PySide6.QtCore import QObject, QThread, Signal, Slot
 from .action_confirmation_dialog import ActionConfirmationDialog
 from .audit_log import NullAuditSink
 from .confirmation_gate import ConfirmationGate
+from .elevation import (ElevationBrokerClient, ElevationQtController,
+                        ElevationRequest, ElevationStatus,
+                        WindowsElevationLauncher, resolve_broker_path)
 from .service_restart import (RESTART_SERVICE_CONTRACT, ServiceIdentityResolver,
+                              ServiceRestartVerifier,
                               ServiceResolutionCode, ServiceRestartProposalFactory,
                               ServiceRestartOutcome, ServiceRestartRunner,
                               ServiceRestartStatus)
@@ -75,7 +79,10 @@ class ChatServiceRestartController(QObject):
                  proposal_factory=None, confirmation_gate=None, executor=None,
                  dialog_factory=ActionConfirmationDialog,
                  resolution_thread_factory=ServiceRestartResolutionThread,
-                 execution_thread_factory=ServiceRestartExecutionThread):
+                 execution_thread_factory=ServiceRestartExecutionThread,
+                 elevation_controller=None, elevation_client=None,
+                 broker_path_resolver=resolve_broker_path,
+                 verifier_factory=ServiceRestartVerifier):
         super().__init__(parent)
         self.complete = complete
         self.audit = audit or NullAuditSink()
@@ -88,6 +95,16 @@ class ChatServiceRestartController(QObject):
         self.dialog_factory = dialog_factory
         self.resolution_thread_factory = resolution_thread_factory
         self.execution_thread_factory = execution_thread_factory
+        self.elevation_client = elevation_client or ElevationBrokerClient(
+            WindowsElevationLauncher(), audit=self.audit
+        )
+        self.elevation_controller = elevation_controller or ElevationQtController(
+            self.elevation_client, self
+        )
+        self.elevation_controller.completed.connect(self._elevation_finished)
+        self.broker_path_resolver = broker_path_resolver
+        self.verifier_factory = verifier_factory
+        self._elevation_active = False
         self._cancel = Event()
         self._grant_id = None
         self._busy = False
@@ -125,6 +142,8 @@ class ChatServiceRestartController(QObject):
         cancel = getattr(self.executor, "cancel", None)
         if cancel:
             cancel()
+        if self._elevation_active:
+            self.elevation_controller.cancel()
 
     @Slot(object, object)
     def _resolved(self, identity, code):
@@ -136,13 +155,10 @@ class ChatServiceRestartController(QObject):
         if code is ServiceResolutionCode.PROTECTED:
             self._finish("このサービスは WindowsPet から再起動できません。")
             return
-        if code is ServiceResolutionCode.ADMIN_REQUIRED:
-            self._finish("この操作には管理者権限が必要なため、実行を開始できませんでした。")
-            return
         if code is ServiceResolutionCode.NOT_FOUND or identity is None:
             self._finish("対象のサービスが見つからなかったため、再起動しませんでした。")
             return
-        if code is not ServiceResolutionCode.MATCHED:
+        if code not in (ServiceResolutionCode.MATCHED, ServiceResolutionCode.ADMIN_REQUIRED):
             self._finish("確認後に対象サービスの状態が変わったため、再起動しませんでした。")
             return
 
@@ -163,6 +179,9 @@ class ChatServiceRestartController(QObject):
             return
 
         self._grant_id = result.grant.grant_id
+        if code is ServiceResolutionCode.ADMIN_REQUIRED:
+            self._start_elevation(proposal, identity, result.grant)
+            return
         thread = self.execution_thread = self.execution_thread_factory(
             self.executor, self._grant_id, proposal, identity, self._cancel, self
         )
@@ -170,6 +189,54 @@ class ChatServiceRestartController(QObject):
         thread.finished.connect(self._on_execution_thread_finished)
         thread.finished.connect(thread.deleteLater)
         thread.start()
+
+    def _start_elevation(self, proposal, identity, grant):
+        """Consume the Main grant once, then hand off only the immutable request."""
+        try:
+            broker_path = self.broker_path_resolver()
+        except Exception:
+            self.gate.grants.cancel(grant.grant_id)
+            self._finish("管理者権限の準備を確認できなかったため、実行しませんでした。")
+            return
+        consumed = self.gate.grants.consume_for(
+            grant.grant_id, RESTART_SERVICE_CONTRACT, proposal
+        )
+        if not consumed.success:
+            self._finish("承認情報を一度だけ消費できなかったため、実行しませんでした。")
+            return
+        try:
+            request = ElevationRequest.from_proposal(proposal, grant)
+        except Exception:
+            self._finish("承認内容を安全な昇格要求へ変換できなかったため、実行しませんでした。")
+            return
+        verifier = self.verifier_factory(self.resolver)
+        def verify(_result):
+            status, code = verifier.verify_running(identity, cancel=self._cancel.is_set)
+            return code if status == "succeeded" else False
+        self._elevation_active = True
+        if not self.elevation_controller.start(request, broker_path, verify):
+            self._elevation_active = False
+            self._finish("管理者権限の昇格を開始できなかったため、実行しませんでした。")
+
+    @Slot(object)
+    def _elevation_finished(self, outcome):
+        if not self._elevation_active:
+            return
+        self._elevation_active = False
+        self._grant_id = None
+        self._finish(self._message_for_elevation(outcome))
+
+    @staticmethod
+    def _message_for_elevation(outcome):
+        if outcome.status is ElevationStatus.SUCCEEDED:
+            return "サービスを再起動しました。"
+        if outcome.reason == "uac_cancelled":
+            return "管理者権限の確認がキャンセルされたため、実行しませんでした。"
+        if outcome.reason in {"verification_failed", "verification_required"}:
+            return "再起動処理は実行しましたが、サービスが実行中であることを確認できませんでした。"
+        if outcome.reason in {"broker_timeout", "broker_execution_timeout"}:
+            return "サービスの再起動がタイムアウトしました。"
+        return "サービスの再起動処理を実行できませんでした。"
 
     @Slot(object)
     def _finished(self, outcome):
@@ -218,8 +285,10 @@ class ChatServiceRestartController(QObject):
     def shutdown(self):
         """Request cooperative shutdown; bounded waits are reserved for exit."""
         self.cancel()
+        self.elevation_controller.shutdown()
         for thread in (self.resolution_thread, self.execution_thread):
             if thread is not None and thread.isRunning():
                 thread.wait(6000)
         self._busy = False
         self._grant_id = None
+        self._elevation_active = False

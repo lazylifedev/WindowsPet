@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -22,11 +23,14 @@ from windows_pet.elevation import (
     canonical_json_bytes,
     write_envelope_file,
 )
+from windows_pet.elevation.executors import ElevatedRestartServiceExecutor
 from windows_pet.service_restart import (
     RESTART_SERVICE_CONTRACT,
+    RESTART_SERVICE_SCRIPT,
     RESTART_SERVICE_TEMPLATE_ID,
     ServiceIdentity,
     ServiceRestartProposalFactory,
+    canonical_script,
 )
 
 
@@ -100,6 +104,54 @@ def test_same_envelope_is_rejected_by_a_second_broker_process(tmp_path):
     assert second_result.status is ElevationStatus.REJECTED
     assert second_result.result_code in {"grant_reused", "replayed_nonce"}
     assert first_executor.execution_count == 1 and second_executor.execution_count == 0
+
+
+def test_default_broker_is_fake_safe_and_production_is_explicit():
+    from windows_pet.elevation import ElevatedOperationDispatcher
+    assert isinstance(BrokerEntryPoint().dispatcher.executors["restart_service"], FakeElevatedExecutor)
+    assert isinstance(BrokerEntryPoint.production().dispatcher.executors["restart_service"], ElevatedRestartServiceExecutor)
+
+
+def test_production_restart_executor_uses_exact_fixed_process_boundary(tmp_path):
+    _gate, request = _approved_request()
+    captured = {}
+
+    class Process:
+        returncode = 0
+        def poll(self): return self.returncode
+        def communicate(self, **kwargs): return b"ignored", b"ignored"
+        def terminate(self): pass
+        def kill(self): pass
+
+    def popen(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        captured["script"] = Path(argv[-1]).read_bytes()
+        return Process()
+
+    powershell = tmp_path / "powershell.exe"
+    powershell.write_bytes(b"fake")
+    executor = ElevatedRestartServiceExecutor(
+        process_factory=popen, powershell_exe=powershell, working_directory=tmp_path
+    )
+    outcome = executor.execute("restart_service", dict(request.parameters))
+    assert outcome.status is ElevationStatus.SUCCEEDED
+    assert captured["argv"][:4] == [str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive"]
+    assert captured["argv"][4] == "-File"
+    assert b"Restart-Service" not in " ".join(captured["argv"]).encode()
+    assert captured["script"] == canonical_script(RESTART_SERVICE_SCRIPT)
+    assert captured["kwargs"]["shell"] is False
+    assert captured["kwargs"]["stdin"] is subprocess.DEVNULL
+    assert captured["kwargs"]["cwd"] == str(tmp_path)
+    assert captured["kwargs"]["env"]["WINDOWSPET_PS_PARAMETERS"]
+
+
+def test_result_path_is_deterministic_and_bounded(tmp_path):
+    envelope = tmp_path / ("envelope-" + "a" * 40 + ".json")
+    result = BrokerEntryPoint.result_path_for_envelope(envelope)
+    assert result.name == "envelope-" + "a" * 40 + ".result.json"
+    with pytest.raises(ValueError):
+        BrokerEntryPoint.result_path_for_envelope(tmp_path / "arbitrary.json")
 
 
 def _claim_worker(directory: str, queue):

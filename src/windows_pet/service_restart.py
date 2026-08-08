@@ -171,6 +171,57 @@ class ServiceIdentityResolver:
             return self.last_code
         return ServiceResolutionCode.MATCHED if current == identity else ServiceResolutionCode.CHANGED
 
+    def read_only_identity(self, service_name):
+        """Read the canonical service identity without requiring admin rights."""
+        rows = (self.inspection(service_name) if self._inspection_is_default
+                else self.inspection()) if self.inspection else []
+        matches = [row for row in rows
+                   if _norm(row.get("name", row.get("service_name", ""))) == _norm(service_name)]
+        if len(matches) != 1:
+            return None
+        row = matches[0]
+        return ServiceIdentity(
+            str(row.get("name", row.get("service_name", ""))),
+            str(row.get("displayName", row.get("display_name", ""))),
+            str(row.get("state", row.get("status", ""))),
+        )
+
+
+class ServiceRestartVerifier:
+    """Bounded read-only verification usable before/after elevation."""
+
+    def __init__(self, resolver, *, clock=time.monotonic, sleeper=time.sleep):
+        self.resolver = resolver
+        self.clock = clock
+        self.sleeper = sleeper
+
+    def verify_running(self, identity, cancel=None):
+        cancel = cancel or (lambda: False)
+        deadline = self.clock() + SERVICE_VERIFICATION_TIMEOUT_SECONDS
+        while True:
+            if cancel():
+                return "cancelled", "cancelled"
+            try:
+                reader = getattr(self.resolver, "read_only_identity", None)
+                current = (reader(identity.service_name) if reader else
+                           self.resolver.resolve(identity.service_name))
+            except Exception:
+                return "verification_failed", "verification_provider_error"
+            if current is None:
+                return "verification_failed", "service_not_found_after_execution"
+            if (current.service_name != identity.service_name
+                    or current.display_name != identity.display_name):
+                return "verification_failed", "identity_changed"
+            state = _norm(current.observed_status).replace(" ", "")
+            if state == "running":
+                return "succeeded", "ok"
+            if state not in SERVICE_TRANSITIONAL_STATES:
+                return "verification_failed", "service_not_running"
+            remaining = deadline - self.clock()
+            if remaining <= 0:
+                return "verification_failed", "verification_timeout"
+            self.sleeper(min(SERVICE_VERIFICATION_POLL_INTERVAL_SECONDS, remaining))
+
 
 class ServiceRestartProposalFactory:
     def __init__(self, factory=None):

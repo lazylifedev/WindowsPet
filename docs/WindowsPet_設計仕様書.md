@@ -1,10 +1,10 @@
 # WindowsPet 設計仕様書
 
 **Subtitle:** PCに住み、ユーザーと共に考え、最強の情シスとして実作業で困りごとを解決するローカルAIパートナー\
-**Version:** 0.4.0\
+**Version:** 0.4.1\
 **Date:** 2026-08-08\
 **Audience:** ChatGPT / Codex / WindowsPet developers\
-**Status:** Phase 3B confirmed service-restart implementation is retained; Phase 4A one-shot Elevation Broker foundation is implemented with Fake/read-only validation. Real UAC and real administrative restart remain intentionally unexecuted.
+**Status:** Phase 3B confirmed service-restart implementation is retained; Phase 4A foundation and Phase 4B production wiring are implemented with automated Fake/read-only validation. Real UAC, real Broker Restart-Service, and real administrative changes remain intentionally unexecuted.
 
 > **AIへの最重要指示:** WindowsPetを単なるデスクトップペット、ChatGPTクライアント、チャットUI、読み取り専用検索アプリとして扱わないこと。WindowsPetはローカルPCで「生きる」一貫した知性主体であり、ユーザーとは主従ではなくパートナーとして接する。普段は控えめでユーザーの意思と集中を尊重し、頼まれたときは最強の情シスとして、曖昧な困りごとの本質をPCの事実・会話・記憶から推定し、知らないことも自ら調査・推論・計画し、必要ならWebや外部AIを拡張頭脳として利用する。確認不要な調査は主体的に進め、確認が必要な副作用だけを適切な時点で提示し、承認された範囲を実行・検証する。作業後は内部的にReflectionを行い、経験を次回へ活かせる知識へ変換する。ユーザーから見える知性の主体は常にWindowsPetであり、外部AIモデルを別人格・上司・別の相談相手として見せない。
 
@@ -464,6 +464,9 @@ chat-serverは複数WindowsPetの**集合知（Global Brain / Shared Knowledge�
 - Phase 4A: `src/windows_pet/elevation/` に immutable `ElevationRequest`／`ElevationEnvelope`、canonical JSON strict schema、ユーザー専用一時Envelopeファイル、Broker identity validation、`restart_service` allowlist、Broker側exact template/hash／parameter再検証、structured result、Main側result binding／read-only verifier、Native `ShellExecuteExW` skeleton、Fake launcher／executor、QThread subclass lifecycleを実装済み。
 - Phase 4A replay protection: `AppLocalData\WindowsPet\elevation\claims` の排他的ファイル作成による grant／nonce のcross-process one-shot claimを実装。claim領域にはhashだけを保存し、raw script、secret、raw outputは保存しない。
 - Phase 4Aの自動検証では実UAC、実Elevation、Restart-Service、Stop-Service、Start-Service、その他の管理者変更を実行していない。
+- Phase 4B: `ADMIN_REQUIRED` を確認前に拒否せず、標準権限では Main 側の one-shot Grant consume、`ElevationRequest`、決定論的な同梱 Broker path検証、Native UAC、Broker、独立read-only service verificationへ接続。管理者として起動された場合は既存 `ServiceRestartRunner` の直接経路とconsume契約を維持。
+- Phase 4B: production Broker は明示構築時だけ `ElevatedRestartServiceExecutor` を使用し、通常BrokerはFake-safeを維持。固定script、再hash、restricted environment、固定PowerShell argv、bounded timeout、協調cancel、temp cleanup、決定論的result pathを実装。
+- Phase 4B automated validation: standard-user Fake elevation normal/cancel/missing-Broker、Grant二重利用防止、result binding、production executor Fake Popen境界、Qt integrated stress 100/50/50を実施。pytestは281 passed、skipped 0、xfailed 0。
 
 Implementation baseline: `b7e283cd9168c33531ce49f17a194db1dff08b0a` (`fix: make confirmed launch executable and tested`).\
 Validation at baseline: `102 passed`, compileall success, build success.
@@ -474,13 +477,13 @@ Validation at baseline: `102 passed`, compileall success, build success.
 - AIへ公開されているToolは読み取り専用ファイル検索が中心。
 - PowerShell実行runtimeは未実装。
 - 本番の`LocalInspectionWindow`生成時に永続AuditSinkをまだ接続していない。
-- `grant_consumed`／`grant_rejected`を含む実行監査の統合が未完成。
+- 実UAC、署名済みBroker、実管理者変更の手動確認は未実施。
 - UI／QThreadの製品フローを網羅する統合テストは不足している。
 - Start Menuの`.lnk`リンク先を解決していない。
 - Uninstall情報から実行ファイルを推定していない。
 - PATHまたはApp Pathsへ登録されていないアプリは名前検索で見つからない場合がある。
 - local persistent memory、revalidation、chat-server sharingは未実装。
-- File server、Teams connector、UI automationは未実装。Phase 4A Brokerは基盤とFake/read-only検証までで、実UAC接続は未実行。
+- File server、Teams connector、UI automation、low-risk PowerShell Tool群は未実装。
 
 ## 16. Roadmap
 
@@ -490,7 +493,7 @@ Validation at baseline: `102 passed`, compileall success, build success.
 4. Local Intelligence Runtime：高速intent routing、Local Skill/Memory、軽量ローカルAI、confidence評価、クラウドエスカレーション判定。
 5. Research Orchestrator：未知タスク分解、ローカル調査、公式Web／一般Web検索、根拠管理、re-plan loop。
 6. PowerShellExecutionProposal、Policy、確認画面、Executor、verification、auditの実装。
-7. Phase 4A基盤を実UAC／署名済みBrokerへ接続し、read-only verificationを既存のservice restart UIへ統合する。
+7. 署名済みBrokerと実UAC／実Restart-Serviceの手動確認を、開発Fake経路と分離して実施する。
 8. 低リスクPowerShell Tool: process、service、network、event log、winget、registry read。
 9. 変更系PowerShell Tool: service、startup、registry write、scheduled task、Windows settings、network/firewall/ACL。
 10. Reflection pipeline、local persistent memory、revalidation、Memory UI、API context compression、successful-procedure distillation。

@@ -20,7 +20,7 @@ from .envelope import (
     read_envelope_file,
     write_envelope_file,
 )
-from .launcher import ElevationLauncher, FakeElevationLauncher, WindowsElevationLauncher
+from .launcher import ElevationLauncher, FakeElevationLauncher, WindowsElevationLauncher, resolve_broker_path
 from .client import ElevationBrokerClient
 from .models import (
     ElevationEnvelope,
@@ -52,6 +52,7 @@ __all__ = [
     "ElevationRequest", "ElevationResult", "ElevationStatus", "ElevationExecutionThread", "ElevationQtController", "EnvelopeFile",
     "EnvelopeFileError", "EnvelopeValidator", "FakeElevatedExecutor",
     "FakeElevationLauncher", "OneShotClaimStore", "WindowsElevationLauncher",
+    "resolve_broker_path",
     "canonical_json_bytes", "default_elevation_directory", "read_envelope_file", "validate_broker_identity",
     "write_envelope_file",
 ]

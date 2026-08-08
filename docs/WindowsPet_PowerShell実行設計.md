@@ -1,9 +1,9 @@
 # WindowsPet PowerShell実行設計
 
-**Version:** 0.3.0\
+**Version:** 0.4.0\
 **Date:** 2026-08-08\
 **Audience:** ChatGPT / Codex / WindowsPet developers\
-**Status:** Phase 3B state-change runtime implemented; Phase 4A one-shot Elevation Broker foundation implemented with Fake/read-only validation. Real UAC and real administrative operations are not executed by the development test path.\
+**Status:** Phase 3B state-change runtime and Phase 4B service-restart elevation wiring are implemented with Fake/read-only validation. Real UAC, real Broker Restart-Service, and real administrative operations are not executed by the development test path.\
 **Related:** `WindowsPet_設計仕様書.md`
 
 > **AIへの最重要指示:** PowerShellをWindowsPetの強力な実行バックエンドとして利用するが、AIへ無制限のshell権限を渡さない。AIは構造化された操作またはexact scriptを提案し、WindowsPetがPolicy Gate、確認、one-shot ExecutionGrant、実行前再検証、結果検証、監査を管理する。
@@ -801,6 +801,17 @@ Phase 4A foundation contract:
 
 Phase 4A acceptance status: Fake and read-only validation complete; real UAC prompt, real elevation, and real `Restart-Service` remain pending by design. Phase 3B's latest-build real `Restart-Service` confirmation is also pending.
 
+Phase 4B production wiring:
+
+- `ServiceResolutionCode.ADMIN_REQUIRED` now proceeds through the existing SCRIPT_REVIEW confirmation instead of being rejected before confirmation. The already-admin path retains `ServiceRestartRunner`; the standard-user path consumes the Main-side grant exactly once before creating `ElevationRequest`.
+- The standard-user path uses the existing `ElevationQtController` and `WindowsElevationLauncher`, resolves only the bundled `WindowsPet.ElevationBroker.exe` from the trusted application directory, and fails closed before UAC when the helper is missing or has the wrong identity.
+- The Broker's normal constructor remains Fake-safe. `BrokerEntryPoint.production()` explicitly installs `ElevatedRestartServiceExecutor`, whose only operation is the canonical `restart_service` template with fixed PowerShell arguments, restricted environment, hash checks, bounded execution, cooperative cancellation, and temporary-script cleanup.
+- The Broker derives `envelope-<random>.result.json` from the validated envelope path. The CLI has no free `--result` path; result schema, canonical JSON, request binding, operation binding, script-hash binding, size bound, exclusive creation, and root boundary are enforced.
+- Main performs independent read-only verification of the canonical service name, display identity, and actual `Running` state. Broker exit code alone never produces a success message.
+- Automated Phase 4B validation covers standard-user normal/cancel/fail-closed flows, one-shot grant reuse, wrong result bindings, production executor Fake Popen boundaries, and integrated Qt stress (normal 100, cancel 50, shutdown 50). The final regression run is 281 passed, skipped 0, xfailed 0.
+
+Phase 4B acceptance status: automated Fake/read-only validation and both PyInstaller targets are complete. Real UAC prompt, real elevation, real Broker `Restart-Service`, signed-helper validation, and Phase 3B's latest-build direct real `Restart-Service` confirmation remain pending by design.
+
 ### Phase 5 — Memory and shared procedures
 
 - local procedure memory
@@ -834,3 +845,4 @@ Canonical file: `docs/WindowsPet_PowerShell実行設計.md`. Keep the filename s
 - **0.2.0 — 2026-08-08:** Promoted one-shot UAC elevation from a future concept to a core administration capability implemented alongside state-changing PowerShell, supporting the Local PC full-capability principle without granting persistent administrator rights.
 - **0.2.1 — 2026-08-08:** Adopted stable Git-canonical filenames and aligned references with the Local-first WindowsPet architecture without changing PowerShell safety boundaries.
 - **0.3.0 — 2026-08-08:** Implemented the Phase 4A one-shot Elevation Broker foundation: canonical Envelope, secured payload file, exact catalog/hash validation, cross-process file-backed grant/nonce claims, Fake/native launcher boundary, structured result binding, independent verification hook, Qt lifecycle, and dedicated Broker build target. Real UAC and real administrative operations remain unexecuted.
+- **0.4.0 — 2026-08-08:** Connected the Phase 4A contract to the service-restart UI for both admin-direct and standard-user elevation paths; added Main Grant consume, fixed production Broker executor, bounded deterministic result files, read-only verification, and Fake/read-only integrated stress. Real UAC and real administrative operations remain unexecuted.
