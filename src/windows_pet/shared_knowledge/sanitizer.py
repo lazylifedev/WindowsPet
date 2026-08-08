@@ -11,12 +11,19 @@ _EMAIL = re.compile(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b")
 _PATH = re.compile(r"(?:^[A-Za-z]:[\\/]|^\\\\|/Users/|/home/|/var/|\\Users\\|private-tool)", re.I)
 _SECRET = re.compile(r"(?:api[_ -]?key|access[_ -]?token|password|credential|secret|bearer|private key)", re.I)
 _IP = re.compile(r"(?<!\d)(\d{1,3}(?:\.\d{1,3}){3})(?!\d)")
-_FORBIDDEN_FIELDS = {"username", "personal_path", "private_filename", "email", "credential", "private_ip", "hostname", "conversation", "schedule", "preference", "habit", "memory", "screenshot", "document", "raw_log", "stdout", "stderr"}
+_INTERNAL_HOST = re.compile(r"\b(?:localhost|[a-z0-9-]+\.(?:local|lan|internal))\b", re.I)
+_UNSAFE_EXECUTION = re.compile(r"(?:powershell|cmd\.exe|invoke-expression|arbitrary shell|download-and-execute)", re.I)
+_FORBIDDEN_FIELDS = {
+    "username", "personal_path", "private_filename", "email", "credential", "token", "password", "cookie", "private_key",
+    "private_ip", "hostname", "internal_hostname", "conversation", "schedule", "personal_schedule", "preference",
+    "personality_preference", "habit", "memory", "screenshot", "document", "raw_log", "stdout", "stderr", "raw_stdout",
+    "raw_stderr", "raw_powershell", "shell_command", "arbitrary_command", "full_path",
+}
 
 
 def _sensitive(value: object) -> bool:
     text = str(value)
-    if _EMAIL.search(text) or _PATH.search(text) or _SECRET.search(text):
+    if _EMAIL.search(text) or _PATH.search(text) or _SECRET.search(text) or _INTERNAL_HOST.search(text):
         return True
     for match in _IP.findall(text):
         try:
@@ -44,6 +51,8 @@ class SharedKnowledgeSanitizer:
         for key in ("intent", "target_type", "target", "source", "compatibility"):
             if _sensitive(data.get(key, "")):
                 return ShareDecision(False, f"sensitive_{key}")
+        if any(_UNSAFE_EXECUTION.search(str(data.get(key, ""))) for key in ("intent", "target_type", "target")):
+            return ShareDecision(False, "unsafe_execution_target")
         aliases = tuple(str(alias).strip()[:120] for alias in data.get("aliases", ()) if str(alias).strip())
         if not aliases or len(aliases) > 20 or any(_sensitive(alias) for alias in aliases):
             return ShareDecision(False, "unsafe_aliases")
@@ -59,6 +68,7 @@ class SharedKnowledgeSanitizer:
                 confidence=max(0.0, min(1.0, float(data.get("confidence", 0.0)))), source="sanitized_local_verified",
                 compatibility=tuple(str(item)[:80] for item in data.get("compatibility", ()) if str(item).strip()), trusted=bool(data.get("trusted", False)),
                 updated_at=str(data.get("updated_at") or SharedSkillRecord.__dataclass_fields__["updated_at"].default_factory()), expires_at=data.get("expires_at"),
+                trust_state=str(data.get("trust_state", "candidate")), knowledge_version=str(data.get("knowledge_version", "v1")),
             )
         except (TypeError, ValueError):
             return ShareDecision(False, "invalid_record")

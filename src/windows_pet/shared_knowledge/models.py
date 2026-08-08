@@ -26,6 +26,8 @@ class SharedSkillRecord:
     trusted: bool = False
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     expires_at: str | None = None
+    trust_state: str = "candidate"
+    knowledge_version: str = "v1"
 
     def is_stale(self, now: datetime | None = None) -> bool:
         if not self.expires_at:

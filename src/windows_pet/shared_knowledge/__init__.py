@@ -5,6 +5,8 @@ from .client import GlobalBrainClient, LocalOnlyGlobalBrainClient
 from .models import ShareDecision, SharedSkillRecord
 from .repository import InMemorySharedKnowledgeRepository, SQLiteSharedKnowledgeRepository
 from .sanitizer import SharedKnowledgeSanitizer
+from .queue import QueuedUpload, SharedKnowledgeUploadQueue
+from .identity import new_installation_evidence_id
 
 __all__ = [
     "GlobalBrainClient",
@@ -16,4 +18,7 @@ __all__ = [
     "SharedKnowledgeMatch",
     "SharedKnowledgeSanitizer",
     "SharedSkillRecord",
+    "QueuedUpload",
+    "SharedKnowledgeUploadQueue",
+    "new_installation_evidence_id",
 ]

@@ -1,10 +1,10 @@
 # WindowsPet 設計仕様書
 
 **Subtitle:** PCに住み、ユーザーと共に考え、最強の情シスとして実作業で困りごとを解決するローカルAIパートナー\
-**Version:** 0.9.0\
+**Version:** 1.0.0\
 **Date:** 2026-08-08\
 **Audience:** ChatGPT / Codex / WindowsPet developers\
-**Status:** Research Orchestrator, bounded Model Routing, optional LLM Reflection interface, Phase 2 Personal Memory, deterministic Reflection/Revalidation foundation, Phase 3B, Phase 4A, Phase 4B, chat application launch, safe application discovery, and Local Intelligence Phase 1 are implemented with automated Fake/read-only validation. Real UAC, real Broker Restart-Service, external research, and real administrative changes remain intentionally unexecuted.
+**Status:** Research Orchestrator, bounded Model Routing, optional LLM Reflection interface, Phase 2 Personal Memory, deterministic Reflection/Revalidation foundation, Phase 3B, Phase 4A, Phase 4B, chat application launch, safe application discovery, Local Intelligence Phase 1, and the local Global Brain MVP are implemented with automated Fake/read-only validation. Real UAC, real Broker Restart-Service, external research, Google Cloud resources, external network transport, and real administrative changes remain intentionally unexecuted.
 
 > **AIへの最重要指示:** WindowsPetを単なるデスクトップペット、ChatGPTクライアント、チャットUI、読み取り専用検索アプリとして扱わないこと。WindowsPetはローカルPCで「生きる」一貫した知性主体であり、ユーザーとは主従ではなくパートナーとして接する。普段は控えめでユーザーの意思と集中を尊重し、頼まれたときは最強の情シスとして、曖昧な困りごとの本質をPCの事実・会話・記憶から推定し、知らないことも自ら調査・推論・計画し、必要ならWebや外部AIを拡張頭脳として利用する。確認不要な調査は主体的に進め、確認が必要な副作用だけを適切な時点で提示し、承認された範囲を実行・検証する。作業後は内部的にReflectionを行い、経験を次回へ活かせる知識へ変換する。ユーザーから見える知性の主体は常にWindowsPetであり、外部AIモデルを別人格・上司・別の相談相手として見せない。
 
@@ -466,7 +466,7 @@ chat-serverは複数WindowsPetの**集合知（Global Brain / Shared Knowledge�
 - Phase 4Aの自動検証では実UAC、実Elevation、Restart-Service、Stop-Service、Start-Service、その他の管理者変更を実行していない。
 - Phase 4B: `ADMIN_REQUIRED` を確認前に拒否せず、標準権限では Main 側の one-shot Grant consume、`ElevationRequest`、決定論的な同梱 Broker path検証、Native UAC、Broker、独立read-only service verificationへ接続。管理者として起動された場合は既存 `ServiceRestartRunner` の直接経路とconsume契約を維持。
 - Phase 4B: production Broker は明示構築時だけ `ElevatedRestartServiceExecutor` を使用し、通常BrokerはFake-safeを維持。固定script、再hash、restricted environment、固定PowerShell argv、bounded timeout、協調cancel、temp cleanup、決定論的result pathを実装。
-- Phase 4B automated validation: standard-user Fake elevation normal/cancel/missing-Broker、Grant二重利用防止、result binding、production executor Fake Popen境界、Qt integrated stress 100/50/50を実施。Phase 2追加後のpytestは307 passed、skipped 0、xfailed 0。
+- Phase 4B automated validation: standard-user Fake elevation normal/cancel/missing-Broker、Grant二重利用防止、result binding、production executor Fake Popen境界、Qt integrated stress 100/50/50を実施。後続機能を含む現行pytestの受入結果は実行時のdelivery reportで管理する。
 - Low-risk PowerShell read: 固定生成scriptとstrict result schemaによる process／service／network に加え、`Get-WinEvent` の bounded event-log read（既定 `System`、明示 log name、message 2048文字上限）と固定 catalog registry read（`app_paths`／`installed_apps`、DisplayName限定）をFake/read-only検証済み。
 - Low-risk registry read: `app_paths`／`installed_apps` の固定 catalog だけを対象にし、DisplayName／DisplayIcon／InstallLocation以外の任意 registry path、secret-oriented key、write は受け付けない bounded read と strict result schema をFake検証済み。
 - Low-risk winget read/search: package name metadata search only。固定 `winget search --name`、source agreement acceptance、non-interactive、source固定、件数上限、30秒timeout、strict result schemaを実機read-only／Fake検証済み。install／upgrade／uninstall／source変更は未実装。
@@ -485,9 +485,12 @@ chat-serverは複数WindowsPetの**集合知（Global Brain / Shared Knowledge�
 - Proactive Speech foundation: `src/windows_pet/proactive/` に startup／time-of-day／known-lunch／idle-return candidate、`ShouldSpeakDecision`、quiet hours、focus／critical-operation suppression、cooldown、daily cap、ignore／dismiss／explicit-negative reaction learning、phrase family variationを追加。候補生成と発話決定を分離し、本文は保存しない。
 - Personality foundation: `src/windows_pet/personality/` に first-meetingからの段階的relationship state、speech preferences、casual-speech permission、bounded structured contextを追加。`KEEP_POLITE`は再質問せず、`ASK_LATER`だけcooldown後に再候補化する。ユーザーの攻撃的・依存的表現は人格適応へ取り込まない。
 - Shared Knowledge client foundation: `src/windows_pet/shared_knowledge/` に abstract skill record、deterministic sanitizer、global eligibility、local SQLite／Fake cache、stale判定、local revalidation interface、networkなしのGlobalBrain transport stubを追加。共有知識は実行権限を持たず、既存resolver／Policy／Confirmation／Grant／Verificationへの再検証を要求する。
+- Global Brain local MVP: `src/windows_pet_global_brain/` に strict FastAPI schema／endpoint、SharedSkill／KnowledgeCandidate／EvidenceAggregate／Compatibility／TrustState domain、InMemory repository、dependency-injected Firestore adapter、verified evidenceのdedup／per-installation cap、deterministic promotion、trusted-only lookup、stale version応答を実装。実Google Cloud SDK／credential／resourceは使用しない。
+- Shared Knowledge upload queue: `src/windows_pet/shared_knowledge/queue.py` に sanitized abstract candidateだけを保持する bounded SQLite queue、age／count制限、dedup、retry metadata、補助アップロード失敗時に本体タスクを失敗扱いにしない送信境界を追加。
+- Shared Knowledge evidence identity: `new_installation_evidence_id()` は machine/user/hostname等から導出しない、reset可能なopaque random IDだけを生成する。
 - Context compression foundation: goal、bounded recent task context、relevant structured memories、relationship style、safe evidenceだけを provider向けに組み立てる `ContextCompressor` を追加。会話全文、raw log、secret、個人pathの送信経路は追加していない。
 
-Implementation baseline: current Git `main` through the local Habit, Proactive Speech, Personality, Context Compression, and Shared Knowledge client foundations.\
+Implementation baseline: current Git `main` through the local Habit, Proactive Speech, Personality, Context Compression, Shared Knowledge client, Global Brain local MVP, and durable upload queue foundations.\
 Validation baseline: Fake/read-only discovery, local learning, deterministic habit/proactive/personality/shared-knowledge tests pass; full acceptance is recorded in the delivery report for the current commit.
 
 ### Current limitations
@@ -497,7 +500,7 @@ Validation baseline: Fake/read-only discovery, local learning, deterministic hab
 - 実UAC、署名済みBroker、実管理者変更の手動確認は未実施。
 - UI／QThreadの製品フローを網羅する統合テストは不足している。
 - literal `DisplayIcon` と安全な `InstallLocation` から決定論的に候補化できない installed app は名前検索で見つからない場合がある。`UninstallString`/`QuietUninstallString` は意図的に利用しない。
-- 実Global Brain／chat-server sharing／Personal Memory cloud syncは未接続。Shared Knowledgeはlocal sanitizer／cache／revalidation interfaceとnetworkなしFake境界までで、実共有は行わない。Local Skill DBは実行学習専用で会話全文を保存しない。Research providerはFake/Protocol境界までで、実Web／実OpenAI reflectionは未接続。
+- 実Global BrainのGoogle Cloud／Cloud Run／Firestore接続、chat-server sharing、HTTPS transport、Personal Memory cloud syncは未接続。Global Brainはlocal FastAPI／InMemory／Fake Firestore adapterで検証済みだが、実共有は行わない。Local Skill DBとupload queueは実行学習・抽象候補専用で会話全文を保存しない。Research providerはFake/Protocol境界までで、実Web／実OpenAI reflectionは未接続。
 - Habit／Proactive／Personalityの製品UIからの自動発話・設定画面統合は今後の課題。現在のfoundationはlocal service／SQLite／Fake clockテストで検証する。
 - File server、Teams connector、UI automation、自由形式のPowerShell Tool群は未実装。
 
@@ -513,12 +516,12 @@ Validation baseline: Fake/read-only discovery, local learning, deterministic hab
 9. Habit Memory／consolidation／forgetting foundation（local-only、deterministic、bounded cleanup）を実装済み。
 10. Proactive Speech／anti-annoyance／reaction learning foundationを実装済み。製品UIの自動発話統合は継続課題。
 11. Personality／relationship／casual permission／context compression foundationを実装済み。
-12. Shared Knowledge sanitizer／eligibility／local cache／revalidation foundationを実装済み。実Global Brain接続は未実装。
+12. Shared Knowledge sanitizer／eligibility／local cache／revalidation、Global Brain local FastAPI／repository／promotion／privacy MVP、durable upload queueを実装済み。実Google Cloud／HTTPS接続は未実装。
 13. 変更系PowerShell Tool: service、startup、registry write、scheduled task、Windows settings、network/firewall/ACL。
 14. Reflection pipeline、local persistent memory、revalidation、Memory UI、API context compression、successful-procedure distillation（foundation実装済み、LLM enrichmentはoptional境界のみ）。
 15. Luna→Terra→Solのlatency/cost/confidence aware model routingと評価基盤（決定論的foundation実装済み、実provider接続は継続課題）。
 16. File server、Teams connector。
-17. chat-server shared knowledge、access control、provenance、conflict resolution、複数ペットの集合知。
+17. 実Google Cloud Cloud Run／Firestore、HTTPS client transport、access control、provenanceの拡張、conflict resolution、複数ペットの集合知。
 18. capability discovery、UI Automation拡張、rollback、update distribution、diagnostics、performance/cost optimization。
 
 ## 17. MVP acceptance criteria
@@ -605,3 +608,4 @@ ChatGPTプロジェクト共有ストレージには仕様書本体の複製を�
 - **0.7.0 — 2026-08-08:** Added the local Personal Memory Phase 2 foundation, inspection/deletion UI, deterministic privacy/retention boundaries, Reflection metadata, verified Skill promotion, and abstract-target revalidation boundaries.
 - **0.8.0 — 2026-08-08:** Added the local Research Orchestrator foundation, Capability Registry, Evidence provenance/trust, CandidatePlan and bounded state machine, confirmation/re-plan boundaries, Fake providers, deterministic Local/Luna/Terra/Sol routing, and optional structured LLM Reflection interface. Real Web/OpenAI/Cloud/UAC/admin operations remain unexecuted.
 - **0.9.0 — 2026-08-08:** Added local Habit Memory consolidation/decay/forgetting, Proactive Speech anti-annoyance and reaction learning, gradual Personality/relationship and casual-speech permission, bounded context compression, and Shared Knowledge sanitizer/cache/revalidation interfaces. No cloud resource, network transport, external upload, UAC, or administrative change was added.
+- **1.0.0 — 2026-08-08:** Added the local Global Brain MVP: strict FastAPI API, abstract domain models, InMemory/Fake Firestore repository boundary, verified evidence aggregation and promotion, trusted-only compatibility lookup, server-side privacy rejection, and bounded sanitized upload queue. Real Google Cloud deployment and HTTPS transport remain pending.

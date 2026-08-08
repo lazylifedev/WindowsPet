@@ -6,6 +6,8 @@ from windows_pet.shared_knowledge import (
     SharedKnowledgeCache,
     SharedKnowledgeSanitizer,
     SQLiteSharedKnowledgeRepository,
+    SharedKnowledgeUploadQueue,
+    new_installation_evidence_id,
 )
 
 
@@ -53,3 +55,31 @@ def test_sqlite_cache_round_trips_without_network(tmp_path):
     client = LocalOnlyGlobalBrainClient()
     assert client.fetch("launch_app", "notepad") is None
     assert client.publish(cache.resolve("launch_app", "notepad").record) is False
+
+
+def test_upload_queue_persists_only_sanitized_verified_candidates(tmp_path):
+    queue = SharedKnowledgeUploadQueue(tmp_path / "queue.sqlite3", max_items=2)
+    assert queue.enqueue_candidate("event-1", generic(), verified_success=True, global_eligible=True)
+    assert not queue.enqueue_candidate("event-2", {**generic(), "personal_path": r"C:\Users\Alice\x"}, verified_success=True, global_eligible=True)
+    assert not queue.enqueue_candidate("event-3", generic(), verified_success=False, global_eligible=True)
+    assert not queue.enqueue_candidate("event-4", generic(), verified_success=True, global_eligible=False)
+    item = queue.list_ready()[0]
+    assert item.payload["target"] == "notepad"
+    assert "personal_path" not in item.payload
+    assert queue.flush(lambda upload: upload.event_id == "event-1") == (1, 0)
+    assert queue.list_ready() == []
+
+
+def test_upload_queue_deduplicates_and_keeps_failed_upload_local(tmp_path):
+    queue = SharedKnowledgeUploadQueue(tmp_path / "queue.sqlite3")
+    assert queue.enqueue_candidate("event-1", generic(), verified_success=True, global_eligible=True)
+    assert not queue.enqueue_candidate("event-1", generic(), verified_success=True, global_eligible=True)
+    assert queue.flush(lambda _: False) == (0, 1)
+    assert queue.list_ready() == []
+
+
+def test_installation_evidence_id_is_opaque_and_resettable():
+    first = new_installation_evidence_id()
+    second = new_installation_evidence_id()
+    assert first.startswith("install-") and len(first) == 40 and first != second
+    assert "Users" not in first and "hostname" not in first

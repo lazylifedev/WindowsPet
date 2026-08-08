@@ -1,6 +1,6 @@
 # WindowsPet AI Memory / Learning / Personality / Shared Knowledge Specification
 
-Version: 0.6\
+Version: 0.7\
 Date: 2026-08-08\
 Status: Design baseline / implementation reference
 Related: `WindowsPet_設計仕様書.md`
@@ -823,7 +823,7 @@ Current implementation: WindowsPet has a deterministic built-in application-laun
 - basic memory decay,
 - memory inspection UI.
 
-Current implementation: Personal Memory is a separate local-only domain under `src/windows_pet/memory/`, with a repository interface and SQLite adapter. It supports short-term TTL, long-term and protected records, explicit structured remember/forget, bounded lookup, deterministic privacy rejection, reinforcement, cleanup candidates, corrupt-database safe fallback, and a small inspection/deletion UI. No HTTP, cloud, OpenAI upload, or Global Brain call is made. Reflection foundation is also local and deterministic: structured Experience -> Reflection -> provenance-bearing verified LearningCandidate -> abstract Local Skill promotion -> current resolver revalidation. Unverified execution, cancellation, policy rejection, secrets, raw logs, raw conversation, and machine-specific paths are never promoted. Global Brain and cloud sharing remain unimplemented.
+Current implementation: Personal Memory is a separate local-only domain under `src/windows_pet/memory/`, with a repository interface and SQLite adapter. It supports short-term TTL, long-term and protected records, explicit structured remember/forget, bounded lookup, deterministic privacy rejection, reinforcement, cleanup candidates, corrupt-database safe fallback, and a small inspection/deletion UI. Personal Memory still makes no HTTP, cloud, or OpenAI upload. Reflection foundation is also local and deterministic: structured Experience -> Reflection -> provenance-bearing verified LearningCandidate -> abstract Local Skill promotion -> current resolver revalidation. Unverified execution, cancellation, policy rejection, secrets, raw logs, raw conversation, and machine-specific paths are never promoted.
 
 ### Research Orchestrator and model boundaries
 
@@ -840,6 +840,8 @@ External research and reasoning are represented by provider protocols and Fake p
 - abstract/sanitized records only,
 - success/failure aggregation,
 - local cache of trusted Global Brain knowledge.
+
+Current implementation: The local MVP under `src/windows_pet_global_brain/` provides strict FastAPI health, lookup, candidate, result, and knowledge-version endpoints; SharedSkill/KnowledgeCandidate/ExecutionEvidenceAggregate/Compatibility/TrustState domain models; InMemory and dependency-injected Fake Firestore repository boundaries; server-side reuse of the deterministic shared-knowledge sanitizer; verified-success-only candidates; duplicate/replay and per-installation contribution limits; compatibility-aware trusted-only lookup; deterministic multi-installation promotion; and stale-version signaling. `src/windows_pet/shared_knowledge/queue.py` provides a bounded SQLite queue for sanitized abstract candidates when auxiliary upload is unavailable, and `new_installation_evidence_id()` creates a resettable opaque random evidence ID without machine fingerprinting. Real Cloud Run, Firestore, credentials, and HTTPS transport remain unconnected.
 
 ### Phase 4 - Proactive pet behavior
 
@@ -945,8 +947,8 @@ The intended experience is:
 - Relationship and Personality foundation is implemented under `src/windows_pet/personality/`. Initial state is `FIRST_MEETING` with polite defaults; progression uses days, meaningful interactions, verified assistance, and feedback. Casual speech requires explicit permission, with `KEEP_POLITE` and `ASK_LATER` behavior enforced locally.
 - `ContextCompressor` exposes only bounded goal, recent task context, structured relevant memories, relationship style and safe evidence. It is a provider-facing structure, not a raw conversation archive.
 - Shared Knowledge client foundation is implemented under `src/windows_pet/shared_knowledge/`. The deterministic sanitizer rejects personal paths, private filenames, email, credentials, private IPs, internal details, conversations, schedules, preferences, habits, screenshots, documents and raw logs. Accepted records are abstract skills only.
-- Shared Knowledge is currently local SQLite/Fake only. Every cache match requires local revalidation; stale records cannot be revalidated. The local-only Global Brain client returns no remote data and cannot publish.
-- These foundations do not create Google Cloud resources, call the network, upload data, invoke an external LLM, or grant execution authority. Learned confidence remains subordinate to resolver, Policy, Confirmation, Grant, Verification and Audit boundaries.
+- Shared Knowledge cache matches still require local revalidation; stale records cannot be revalidated. The local-only client remains fail-safe, while the Global Brain MVP is available only as a local/Fake service boundary and does not grant execution authority.
+- These foundations do not create Google Cloud resources, call production network endpoints, upload personal data, invoke an external LLM, or grant execution authority. Learned confidence remains subordinate to resolver, Policy, Confirmation, Grant, Verification and Audit boundaries.
 
 
 ## 24. Document governance
@@ -960,3 +962,4 @@ The canonical copy is `docs/WindowsPet_AI_Memory_Learning_Spec.md` in the `lazyl
 - **0.5 — 2026-08-08:** Recorded the local Personal Memory Phase 2 and deterministic Reflection/Revalidation foundation boundaries.
 - **0.6 — 2026-08-08:** Recorded the local Research Orchestrator, Capability Registry, bounded Evidence/plan/re-plan flow, Local/Luna/Terra/Sol routing foundation, and optional structured LLM Reflection boundary. Real external providers remain unconnected.
 - **0.7 — 2026-08-08:** Recorded local Habit consolidation/forgetting, Proactive Speech anti-annoyance and reaction learning, gradual Personality/relationship and casual-speech permission, bounded context compression, and Shared Knowledge sanitizer/cache/revalidation foundations. No cloud transport or external upload was added.
+- **0.8 — 2026-08-08:** Recorded the local Global Brain MVP, strict API schemas, repository/Fake Firestore boundary, verified evidence promotion, privacy enforcement, stale lookup handling, and sanitized durable upload queue. Real Google Cloud and HTTPS integration remain pending.
