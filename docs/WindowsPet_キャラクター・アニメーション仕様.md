@@ -1,16 +1,18 @@
 # WindowsPet キャラクター・アニメーション仕様
 
-**Version:** 0.1.0  
-**Date:** 2026-08-07  
-**Audience:** ChatGPT / Codex / WindowsPet developers  
-**Status:** Design baseline; character replacement and animation editor are not yet implemented.  
-**Related:** `WindowsPet_設計仕様書_v0.2.0.md`
+**Version:** 0.1.2\
+**Date:** 2026-08-08\
+**Audience:** ChatGPT / Codex / WindowsPet developers\
+**Status:** Design baseline; character replacement and animation editor are not yet implemented.\
+**Related:** `WindowsPet_設計仕様書.md`
 
 > **AIへの最重要指示:** キャラクターはWindowsPet本体の実行エージェント、確認、検証、記憶、監査から分離された表示層として扱う。キャラクターパッケージから任意コード、PowerShell、外部コマンド、PC操作を実行してはならない。キャラクター差し替えによってWindowsPetの権限境界や安全設計を変更しないこと。
 
 ## 0. Quick reference
 
 - WindowsPetのキャラクターは、将来的にユーザーが差し替え可能にする。
+- キャラクターはWindowsPetという一貫した知性主体の表現層であり、Local AI／Luna／Terra／Solの切替を別人格として表現しない。
+- 外部AIやWeb調査の待ち時間は、`thinking`／`researching`／`planning`等の自然な状態アニメーションとして表現できる。
 - キャラクターの画像、アニメーション、イベント割り当ては、本体のエージェントロジックから分離する。
 - 現在使用している `idle`、`sleep`、`thinking`、`wave` を初期の必須アニメーションとする。
 - 必須以外のイベントアニメーションは任意で追加できる。
@@ -170,6 +172,8 @@ characters/
 
 - `listening`
 - `speaking`
+- `researching`
+- `planning`
 - `working`
 - `waiting_confirmation`
 - `success`
@@ -508,7 +512,7 @@ Windowsエクスプローラーから画像ファイルを、対象イベント�
 
 ```text
 error / waiting_confirmation
-  > working / thinking
+  > researching / planning / working / thinking
   > speaking / notification
   > mouse interaction events
   > idle / sleep
@@ -752,10 +756,10 @@ Gitリポジトリ内のMarkdownを正本とする。
 推奨配置:
 
 ```text
-D:\work\WindowsPet\docs\WindowsPet_キャラクター・アニメーション仕様_v0.1.0.md
+D:\work\WindowsPet\docs\WindowsPet_キャラクター・アニメーション仕様.md
 ```
 
-ChatGPTプロジェクト共有ストレージには、正本の参照用コピーを置く。
+ChatGPTプロジェクト共有ストレージには仕様書本体を複製せず、Git正本 `docs/WindowsPet_キャラクター・アニメーション仕様.md` を参照するよう案内するメモだけを置く。
 
 運用規則:
 
@@ -769,3 +773,5 @@ ChatGPTプロジェクト共有ストレージには、正本の参照用コピ�
 ## 23. Revision history
 
 - **0.1.0 — 2026-08-07:** Initial baseline for replaceable character packages, required and optional animation events, 2–10 frame animations, per-frame millisecond duration, vertical event/horizontal frame editor, file picker addition, Explorer drag-and-drop addition, frame reordering, validation, runtime priority, and security separation.
+- **0.1.1 — 2026-08-08:** Added researching/planning agent-state animation hooks so autonomous investigation can be represented visually without changing execution permissions.
+- **0.1.2 — 2026-08-08:** Clarified unified WindowsPet intelligence identity across Local/Luna/Terra/Sol states and adopted stable Git-canonical documentation naming.

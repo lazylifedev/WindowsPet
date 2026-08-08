@@ -1,10 +1,10 @@
 # WindowsPet PowerShell実行設計
 
-**Version:** 0.1.0  
-**Date:** 2026-08-07  
-**Audience:** ChatGPT / Codex / WindowsPet developers  
-**Status:** Design baseline; runtime not yet implemented.  
-**Related:** `WindowsPet_設計仕様書_v0.2.0.md`
+**Version:** 0.2.1\
+**Date:** 2026-08-08\
+**Audience:** ChatGPT / Codex / WindowsPet developers\
+**Status:** Design baseline; runtime not yet implemented.\
+**Related:** `WindowsPet_設計仕様書.md`
 
 > **AIへの最重要指示:** PowerShellをWindowsPetの強力な実行バックエンドとして利用するが、AIへ無制限のshell権限を渡さない。AIは構造化された操作またはexact scriptを提案し、WindowsPetがPolicy Gate、確認、one-shot ExecutionGrant、実行前再検証、結果検証、監査を管理する。
 
@@ -481,9 +481,7 @@ PowerShell自体を停止する必要があるoperationでは、Windows Job Obje
 
 ## 13. Privilege and UAC
 
-初期版は標準ユーザー操作のみを対象とする。
-
-管理者操作は将来、専用Elevation Brokerを使用する。
+標準ユーザーを既定とするが、WindowsPetのローカルPC問題解決能力に管理者操作を含める。管理者権限が必要な場合は、専用Elevation Brokerを使用し、UACとone-shot Grantを通した単一操作として実行する。Elevation Brokerは変更系PowerShell runtimeと同じ基盤フェーズで実装対象とし、「将来の別機能」として後回しにしない。
 
 ```text
 Main WindowsPet
@@ -778,14 +776,17 @@ get_disk_usage
 - verification
 - rollback metadata
 
-### Phase 4 — winget and administration
+### Phase 4 — Administration and one-shot elevation
 
+- Elevation Broker / UAC
 - install／upgrade／uninstall
 - scheduled task
 - startup
 - firewall
 - Windows settings
-- elevation broker
+- network configuration
+- ACL / ownership
+- exact proposal/hash validation across elevation boundary
 
 ### Phase 5 — Memory and shared procedures
 
@@ -808,6 +809,12 @@ get_disk_usage
 - 通常監査へscript本文とraw outputを保存しない。
 - Fake testで実PowerShellを起動せずに主要経路を検証できる。
 
-## 22. Revision history
+## 22. Document governance
+
+Canonical file: `docs/WindowsPet_PowerShell実行設計.md`. Keep the filename stable; use the document `Version` field and Git history for revisions. The general product identity, Local-first AI model, cloud-model routing and shared-knowledge rules are defined by `WindowsPet_設計仕様書.md` and `WindowsPet_AI_Memory_Learning_Spec.md`; this document remains focused on safe PowerShell execution.
+
+## 23. Revision history
 
 - **0.1.0 — 2026-08-07:** Initial PowerShell execution design. Defines structured and reviewed-script modes, exact-script hash binding, Policy/Confirmation/Grant flow, backend selection, safe invocation, secrets, output, cancellation, privilege, verification, audit, memory, testing, and phased implementation.
+- **0.2.0 — 2026-08-08:** Promoted one-shot UAC elevation from a future concept to a core administration capability implemented alongside state-changing PowerShell, supporting the Local PC full-capability principle without granting persistent administrator rights.
+- **0.2.1 — 2026-08-08:** Adopted stable Git-canonical filenames and aligned references with the Local-first WindowsPet architecture without changing PowerShell safety boundaries.
