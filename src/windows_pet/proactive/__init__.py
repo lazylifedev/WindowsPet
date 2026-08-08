@@ -10,6 +10,7 @@ from .models import (
     TriggerKind,
 )
 from .sqlite_repository import SQLiteProactiveRepository
+from .runtime import ProactiveRuntime
 
 __all__ = [
     "ProactiveCandidate",
@@ -20,4 +21,5 @@ __all__ = [
     "ShouldSpeakDecision",
     "SQLiteProactiveRepository",
     "TriggerKind",
+    "ProactiveRuntime",
 ]

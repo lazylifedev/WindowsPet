@@ -26,3 +26,14 @@ class CandidatePlanner:
         if not valid:
             raise ValueError(reason)
         return plan
+
+    def rename_file_resolution(self, goal: ResearchGoal, source_path: str, new_name: str) -> CandidatePlan:
+        """Create a bounded proposal step; execution remains outside Research."""
+        step = PlanStep(secrets.token_urlsafe(8), PlanStepKind.ACTION_PROPOSAL, "file_rename", "rename_file", "rename one selected local file", "file_move", True, False,
+                        (("source_path", source_path), ("new_name", new_name)), "old path absent, new path identity preserved")
+        verify = PlanStep(secrets.token_urlsafe(8), PlanStepKind.VERIFY, "file_rename", "rename_file", "verify the renamed file identity", "file_move", True, False, (), "old path absent, new path identity preserved")
+        plan = CandidatePlan(secrets.token_urlsafe(10), goal.goal_id, (step, verify), "selected local file has the requested name", True, False, RiskClass.STATE_CHANGE, "old path absent, new path identity preserved")
+        valid, reason = self.policy.validate_plan(plan, self.registry)
+        if not valid:
+            raise ValueError(reason)
+        return plan

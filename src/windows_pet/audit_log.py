@@ -65,6 +65,11 @@ class AuditEventType(str, Enum):
     RESEARCH_SUCCEEDED = "research_succeeded"
     RESEARCH_FAILED = "research_failed"
     RESEARCH_CANCELLED = "research_cancelled"
+    FILE_RENAME_PROPOSED = "file_rename_proposed"
+    FILE_RENAME_CONFIRMED = "file_rename_confirmed"
+    FILE_RENAME_STARTED = "file_rename_started"
+    FILE_RENAME_VERIFIED = "file_rename_verified"
+    FILE_RENAME_FAILED = "file_rename_failed"
 
 
 @dataclass(frozen=True)

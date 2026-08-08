@@ -141,3 +141,12 @@ def test_ai_unknown_goal_handoff_returns_structured_local_result_without_executi
     client = AIClient(client=Client(), api_key="test-key")
     assert client.stream_with_tools([], lambda _: None) == "調査結果を確認しました。"
     assert any(tool["name"] == "research_unknown" for tool in client._tools())
+
+
+def test_research_planner_can_propose_file_rename_without_executing_it():
+    from windows_pet.research.planner import CandidatePlanner
+    from windows_pet.research.capabilities import default_capability_registry
+
+    goal = ResearchGoal.from_text("make the selected file name clearer")
+    plan = CandidatePlanner(default_capability_registry()).rename_file_resolution(goal, r"C:\Users\tester\old.txt", "report.txt")
+    assert plan.requires_confirmation and plan.steps[0].capability_id == "file_rename"

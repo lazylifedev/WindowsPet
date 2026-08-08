@@ -80,5 +80,8 @@ def default_capability_registry() -> CapabilityRegistry:
     )
     registry = CapabilityRegistry(readonly)
     registry.register(Capability("process_control", ("stop_process",), SideEffect.PROCESS_CONTROL, True, False, False, ("process_absent",)))
+    registry.register(Capability("file_rename", ("rename_file",), SideEffect.FILE_MOVE, True, False, False, ("identity_preserved",)))
+    registry.register(Capability("settings_navigation", ("open_windows_settings",), SideEffect.APPLICATION_LAUNCH, True, False, False, ("catalog_uri_accepted",)))
+    registry.register(Capability("ui_automation_inspection", ("inspect_ui_controls",), SideEffect.READ_ONLY, False, False, True, ("bounded_tree",)))
     registry.register(Capability("service_control", ("restart_service",), SideEffect.SYSTEM_CHANGE, True, True, False, ("service_state",)))
     return registry

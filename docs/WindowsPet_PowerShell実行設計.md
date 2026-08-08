@@ -830,6 +830,17 @@ Low-risk winget read/search:
 - The generated script resolves only the `winget.exe` application command and invokes fixed `search --name`, `--count`, `--source winget`, `--accept-source-agreements`, `--disable-interactivity`, and `--nowarn` arguments. The timeout is 30 seconds and stdout is still bounded by the common runner cap.
 - Locale-dependent tabular output is parsed only after the separator line and uses a package-ID-shaped column boundary. Results are strict bounded `name`, `id`, and `version` records. The development host's real read-only `7zip` search returned one validated record; no package mutation was run.
 
+Structured operation foundation implemented locally:
+
+- `src/windows_pet/structured_operations.py` provides a code-owned `PowerShellTemplateRegistry`, strict parameter names, fixed script/verification factories, and proposal generation. Callers select a `template_id` and validated parameters; they cannot supply script text or weaken effect/admin metadata.
+- `open_windows_settings` is the first safe candidate. It accepts only the catalog IDs `bluetooth`, `network`, `display`, `sound`, `apps`, and `windows_update`, maps them to fixed `ms-settings:` URIs, and uses the existing Policy → Confirmation → one-shot Grant → Fake/read-only verification boundary. It is a settings-navigation operation, not a registry or system-state write.
+- `OpenWindowsSettingsExecutor` has Fake opener/verifier tests for cancel, exact URI, Grant reuse, and verification failure. Automated tests do not launch Settings and do not mutate Windows configuration.
+
+UI Automation read-only foundation is intentionally separate from execution:
+
+- `src/windows_pet/ui_automation.py` models bounded foreground-window/control inspection, stable automation IDs, control types, enabled state, password-name redaction, ambiguous-control rejection, and stale-window rejection.
+- Click, input, password/value extraction, and real application automation are not implemented.
+
 ### Phase 5 — Memory and shared procedures
 
 - local procedure memory
@@ -867,3 +878,4 @@ Canonical file: `docs/WindowsPet_PowerShell実行設計.md`. Keep the filename s
 - **0.4.1 — 2026-08-08:** Added the low-risk `event_logs` inspection area with fixed `Get-WinEvent` generation, bounded strict result validation, AI tool schema exposure, and Fake/read-only tests. No state-changing event-log capability was added.
 - **0.4.2 — 2026-08-08:** Added the fixed-catalog `registry` inspection area for application metadata, with strict catalog validation, bounded result schema, and Fake/read-only tests. Arbitrary registry access and writes remain excluded.
 - **0.5.0 — 2026-08-08:** Added bounded read-only `winget` package-name search with fixed non-interactive source arguments, locale-tolerant result parsing, strict schema validation, and real read-only/Fake tests. Package mutation remains excluded.
+- **0.6.0 — 2026-08-09:** Added the code-owned structured operation template registry and fixed Windows Settings navigation catalog with Fake confirmation/Grant/verification tests. Added a separate read-only UI Automation foundation; no arbitrary PowerShell, registry write, or GUI side effect was enabled.

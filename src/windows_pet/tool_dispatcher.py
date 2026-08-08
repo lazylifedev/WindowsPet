@@ -11,6 +11,7 @@ from .file_search_settings import SearchSettings
 from .powershell_read_models import WindowsInspectionArea, WindowsInspectionRequest
 from .process_stop_request import parse_process_stop_request
 from .service_restart_request import parse_service_restart_request
+from .file_rename_request import parse_file_rename_request
 
 
 class ToolDispatcher:
@@ -36,6 +37,10 @@ class ToolDispatcher:
     @staticmethod
     def parse_service_restart(arguments: str | dict):
         return parse_service_restart_request(arguments)
+
+    @staticmethod
+    def parse_file_rename(arguments: str | dict, history, current_file_context: str | None = None):
+        return parse_file_rename_request(arguments, history, current_file_context)
 
     @staticmethod
     def research_unknown(arguments: str | dict, orchestrator):

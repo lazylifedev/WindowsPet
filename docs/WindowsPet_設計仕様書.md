@@ -489,6 +489,11 @@ chat-serverは複数WindowsPetの**集合知（Global Brain / Shared Knowledge�
 - Shared Knowledge upload queue: `src/windows_pet/shared_knowledge/queue.py` に sanitized abstract candidateだけを保持する bounded SQLite queue、age／count制限、dedup、retry metadata、補助アップロード失敗時に本体タスクを失敗扱いにしない送信境界を追加。
 - Shared Knowledge evidence identity: `new_installation_evidence_id()` は machine/user/hostname等から導出しない、reset可能なopaque random IDだけを生成する。
 - Context compression foundation: goal、bounded recent task context、relevant structured memories、relationship style、safe evidenceだけを provider向けに組み立てる `ContextCompressor` を追加。会話全文、raw log、secret、個人pathの送信経路は追加していない。
+- File Rename MVP: `src/windows_pet/file_rename.py` に regular local file専用のcanonical path／identity snapshot、invalid/UNC/device/ADS/reserved/reparse拒否、overwrite=false、case-only対応、Before/After proposal、one-shot Grant、独立verification、rollback metadata、privacy-safe audit、verified-only Reflectionを実装。実ユーザーファイルではなくtemp directoryで検証する。
+- Chat／Research接続: `request_file_rename` はユーザー発言または一意なcurrent-file contextにsourceを束縛し、曖昧な「このファイル」は拒否する。Capability Registryへ `file_rename` と `settings_navigation`、`ui_automation_inspection` を追加し、ResearchはCandidatePlanの提案までに留める。
+- Proactive／Personality product wiring: `ProactiveRuntime` を実runtimeへ接続し、startup bubble、60秒間隔idle/lunch候補、quiet/cooldown/focus/critical/daily-cap gate、off/low/normal設定UIを追加。Chatの外部AI入力にはRelationshipServiceのbounded contextだけを渡す。
+- Structured operation foundation: code-owned `PowerShellTemplateRegistry` と strict parameter／fixed script／verification planから構造化Proposalを生成する基盤を追加し、`open_windows_settings` は固定 `ms-settings:` catalogとFake openerだけを実装。実設定変更は行わない。
+- UI Automation Phase 1: `src/windows_pet/ui_automation.py` にread-only bounded tree、foreground window identity、automation ID／control type、password redaction、ambiguous/stale rejectを追加。クリック・入力・実アプリ操作は未実装。
 
 Implementation baseline: current Git `main` through the local Habit, Proactive Speech, Personality, Context Compression, Shared Knowledge client, Global Brain local MVP, and durable upload queue foundations.\
 Validation baseline: Fake/read-only discovery, local learning, deterministic habit/proactive/personality/shared-knowledge tests pass; full acceptance is recorded in the delivery report for the current commit.
@@ -496,13 +501,13 @@ Validation baseline: Fake/read-only discovery, local learning, deterministic hab
 ### Current limitations
 
 - AIへ公開されているToolは読み取り専用のファイル／Windows状態調査と、ローカル安全境界へhandoffする確認付き操作に限定される。
-- 自由形式のPowerShell実行runtimeは未実装。既存の固定・構造化readと確認付き process/service 操作はこの制限の対象外。
+- 自由形式のPowerShell実行runtimeは未実装。固定・構造化read、確認付きprocess/service操作、code-owned structured operation templateはこの制限の対象外。
 - 実UAC、署名済みBroker、実管理者変更の手動確認は未実施。
 - UI／QThreadの製品フローを網羅する統合テストは不足している。
 - literal `DisplayIcon` と安全な `InstallLocation` から決定論的に候補化できない installed app は名前検索で見つからない場合がある。`UninstallString`/`QuietUninstallString` は意図的に利用しない。
 - 実Global BrainのGoogle Cloud／Cloud Run／Firestore接続、chat-server sharing、HTTPS transport、Personal Memory cloud syncは未接続。Global Brainはlocal FastAPI／InMemory／Fake Firestore adapterで検証済みだが、実共有は行わない。Local Skill DBとupload queueは実行学習・抽象候補専用で会話全文を保存しない。Research providerはFake/Protocol境界までで、実Web／実OpenAI reflectionは未接続。
-- Habit／Proactive／Personalityの製品UIからの自動発話・設定画面統合は今後の課題。現在のfoundationはlocal service／SQLite／Fake clockテストで検証する。
-- File server、Teams connector、UI automation、自由形式のPowerShell Tool群は未実装。
+- Proactive／Personalityの製品接続はstartup／idle候補、設定UI、bounded chat contextまで実装済み。昼休みは明示されたlunch memoryがある場合だけ候補化する接続点を残している。
+- UI Automationはread-only foundationのみ。File server、Teams connector、自由形式のPowerShell Tool群、UIA副作用操作は未実装。
 
 ## 16. Roadmap
 
@@ -514,15 +519,17 @@ Validation baseline: Fake/read-only discovery, local learning, deterministic hab
 7. 署名済みBrokerと実UAC／実Restart-Serviceの手動確認を、開発Fake経路と分離して実施する。
 8. 低リスクPowerShell Tool: process、service、network、event log、固定catalog registry read、winget name searchを実装済み。
 9. Habit Memory／consolidation／forgetting foundation（local-only、deterministic、bounded cleanup）を実装済み。
-10. Proactive Speech／anti-annoyance／reaction learning foundationを実装済み。製品UIの自動発話統合は継続課題。
+10. Proactive Speech／anti-annoyance／reaction learning foundationと製品startup／idle／設定UI接続を実装済み。明示lunch memoryのproduction providerは継続課題。
 11. Personality／relationship／casual permission／context compression foundationを実装済み。
 12. Shared Knowledge sanitizer／eligibility／local cache／revalidation、Global Brain local FastAPI／repository／promotion／privacy MVP、durable upload queueを実装済み。実Google Cloud／HTTPS接続は未実装。
-13. 変更系PowerShell Tool: service、startup、registry write、scheduled task、Windows settings、network/firewall/ACL。
-14. Reflection pipeline、local persistent memory、revalidation、Memory UI、API context compression、successful-procedure distillation（foundation実装済み、LLM enrichmentはoptional境界のみ）。
-15. Luna→Terra→Solのlatency/cost/confidence aware model routingと評価基盤（決定論的foundation実装済み、実provider接続は継続課題）。
-16. File server、Teams connector。
-17. 実Google Cloud Cloud Run／Firestore、HTTPS client transport、access control、provenanceの拡張、conflict resolution、複数ペットの集合知。
-18. capability discovery、UI Automation拡張、rollback、update distribution、diagnostics、performance/cost optimization。
+13. 変更系PowerShell Tool: service、startup、registry write、scheduled task、network/firewall/ACL。Windows settingsは固定catalogを開く非変更operationとFake executor foundationまで実装済み。
+14. File Rename、Chat handoff、Research CandidatePlan接続（File Rename MVPを実装済み。同一ボリュームmove／copy／delete／overwriteは未実装）。
+15. UI Automation read-only Phase 1（bounded tree／identity／redaction／stale/ambiguous rejectionを実装済み）。副作用操作は未実装。
+16. Reflection pipeline、local persistent memory、revalidation、Memory UI、API context compression、successful-procedure distillation（foundation実装済み、LLM enrichmentはoptional境界のみ）。
+17. Luna→Terra→Solのlatency/cost/confidence aware model routingと評価基盤（決定論的foundation実装済み、実provider接続は継続課題）。
+18. File server、Teams connector。
+19. 実Google Cloud Cloud Run／Firestore、HTTPS client transport、access control、provenanceの拡張、conflict resolution、複数ペットの集合知。
+20. UI Automation拡張、directory move／copy／delete、rollback実行、update distribution、diagnostics、performance/cost optimization。
 
 ## 17. MVP acceptance criteria
 
@@ -538,6 +545,8 @@ Validation baseline: Fake/read-only discovery, local learning, deterministic hab
 - 秘密情報がmodel input、通常ログ、共有記憶へ入らない。
 
 - 「知らない」「専用Toolがない」だけを理由にタスクを終了せず、調査・Web検索・LLM推論・既存OS機能から実行可能な方法を構築できる。
+
+- File Renameは、source identityをconfirmation／Grantへbindし、承認取消・stale source・destination競合・危険path・reparse・verification failureでmutation 0、成功時はold absent／new identity preservedを確認する。
 - read-onlyの調査を複数段階、自律的に連続実行できる。
 - Webで得たコマンドや手順を直接信頼せず、ローカルPolicyとActionProposalへ変換してから扱う。
 - 失敗時に結果を観測し、別手段へre-planできる。
@@ -609,3 +618,4 @@ ChatGPTプロジェクト共有ストレージには仕様書本体の複製を�
 - **0.8.0 — 2026-08-08:** Added the local Research Orchestrator foundation, Capability Registry, Evidence provenance/trust, CandidatePlan and bounded state machine, confirmation/re-plan boundaries, Fake providers, deterministic Local/Luna/Terra/Sol routing, and optional structured LLM Reflection interface. Real Web/OpenAI/Cloud/UAC/admin operations remain unexecuted.
 - **0.9.0 — 2026-08-08:** Added local Habit Memory consolidation/decay/forgetting, Proactive Speech anti-annoyance and reaction learning, gradual Personality/relationship and casual-speech permission, bounded context compression, and Shared Knowledge sanitizer/cache/revalidation interfaces. No cloud resource, network transport, external upload, UAC, or administrative change was added.
 - **1.0.0 — 2026-08-08:** Added the local Global Brain MVP: strict FastAPI API, abstract domain models, InMemory/Fake Firestore repository boundary, verified evidence aggregation and promotion, trusted-only compatibility lookup, server-side privacy rejection, and bounded sanitized upload queue. Real Google Cloud deployment and HTTPS transport remain pending.
+- **1.1.0 — 2026-08-09:** Added the confirmed local File Rename MVP with identity binding, before/after preview, one-shot Grant, independent verification, rollback metadata, Chat/Research boundaries, production Proactive/Personality wiring, code-owned structured operation templates with fixed Windows Settings catalog, and read-only UI Automation inspection foundation. Real user-file mutation, real Windows settings mutation, UIA side effects, cloud transport, and administrative mutations remain excluded.

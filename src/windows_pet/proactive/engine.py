@@ -67,7 +67,7 @@ class ProactiveEngine:
                critical_operation: bool = False, recent_user_interaction_at: datetime | None = None) -> ShouldSpeakDecision:
         state = self._reset_daily_if_needed(self.repository.load_state(), now)
         settings = self.settings
-        if not settings.enabled:
+        if not settings.enabled or getattr(settings, "speech_level", "normal") == "off":
             return ShouldSpeakDecision(False, 0.0, "disabled_by_user", candidate)
         if candidate.category in state.disabled_categories:
             return ShouldSpeakDecision(False, 0.0, "category_disabled", candidate)
@@ -82,7 +82,8 @@ class ProactiveEngine:
         cooldown = _parse(state.cooldown_until)
         if cooldown and now < cooldown:
             return ShouldSpeakDecision(False, 0.0, "cooldown", candidate)
-        if state.daily_count >= max(0, settings.daily_cap):
+        daily_cap = min(settings.daily_cap, 1) if getattr(settings, "speech_level", "normal") == "low" else settings.daily_cap
+        if state.daily_count >= max(0, daily_cap):
             return ShouldSpeakDecision(False, 0.0, "daily_cap", candidate)
         ignored = state.ignored_count_by_category.get(candidate.category, 0)
         score = max(0.0, candidate.score - min(0.5, ignored * 0.12) + candidate.habit_confidence * 0.1)

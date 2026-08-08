@@ -365,9 +365,9 @@ class InputBubble(BubbleFrame):
     pointer_left = Signal()
     focus_state_changed = Signal(bool)
     draft_state_changed = Signal(bool)
-    closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict); api_settings_requested=Signal(); application_launch_requested=Signal(object); application_launch_ready=Signal(object); process_stop_ready=Signal(object); service_restart_ready=Signal(object); cancel_processing_requested=Signal()
+    closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict); api_settings_requested=Signal(); application_launch_requested=Signal(object); application_launch_ready=Signal(object); process_stop_ready=Signal(object); service_restart_ready=Signal(object); file_rename_ready=Signal(object); cancel_processing_requested=Signal()
     def __init__(self, pet, worker_factory=AIWorker, local_skill_router=None, memory_service=None):
-        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self.local_skill_router=local_skill_router; self.memory_service=memory_service; self._pending=False; self._local_action_pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False; self._active_user_text=None; self._retry_text=None; self._last_error_kind=None; self._pending_application_launch_request=None; self._pending_process_stop_request=None; self._pending_service_restart_request=None
+        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self.local_skill_router=local_skill_router; self.memory_service=memory_service; self.current_file_context=None; self._pending=False; self._local_action_pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False; self._active_user_text=None; self._retry_text=None; self._last_error_kind=None; self._pending_application_launch_request=None; self._pending_process_stop_request=None; self._pending_service_restart_request=None; self._pending_file_rename_request=None
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.card=QFrame(self); self.card.setStyleSheet('QFrame{background:#20242b;border:0;}')
         # A layered top-level window must never receive an effect whose expanded
@@ -543,11 +543,16 @@ class InputBubble(BubbleFrame):
             self._worker.process_stop_requested.connect(self._on_process_stop_requested, Qt.ConnectionType.QueuedConnection)
         if hasattr(self._worker, "service_restart_requested"):
             self._worker.service_restart_requested.connect(self._on_service_restart_requested, Qt.ConnectionType.QueuedConnection)
+        if hasattr(self._worker, "file_rename_requested"):
+            self._worker.file_rename_requested.connect(self._on_file_rename_requested, Qt.ConnectionType.QueuedConnection)
         if hasattr(self._worker, "application_launch_handed_off"):
             self._worker.application_launch_handed_off.connect(
                 self._on_local_action_handed_off, Qt.ConnectionType.QueuedConnection
             )
             self._worker.application_launch_handed_off.connect(self._thread.quit)
+        if hasattr(self._worker, "file_rename_handed_off"):
+            self._worker.file_rename_handed_off.connect(self._on_local_action_handed_off, Qt.ConnectionType.QueuedConnection)
+            self._worker.file_rename_handed_off.connect(self._thread.quit)
         self._worker.finished.connect(self._on_finished, Qt.ConnectionType.QueuedConnection)
         self._worker.failed.connect(self._on_failed, Qt.ConnectionType.QueuedConnection)
         self._worker.finished.connect(self._thread.quit); self._worker.failed.connect(self._thread.quit)
@@ -637,6 +642,10 @@ class InputBubble(BubbleFrame):
     def _on_service_restart_requested(self, request):
         self._pending_service_restart_request = request
 
+    @Slot(object)
+    def _on_file_rename_requested(self, request):
+        self._pending_file_rename_request = request
+
     @Slot(str)
     def _on_powershell_started(self, area: str) -> None:
         self._show_response_status('Windowsの状態を調査しています…')
@@ -655,6 +664,9 @@ class InputBubble(BubbleFrame):
         request, self._pending_service_restart_request = self._pending_service_restart_request, None
         if request is not None and self._local_action_pending and not self._cancel_requested:
             self.service_restart_ready.emit(request)
+        request, self._pending_file_rename_request = self._pending_file_rename_request, None
+        if request is not None and self._local_action_pending and not self._cancel_requested:
+            self.file_rename_ready.emit(request)
 
     def show_local_action_status(self, text):
         if not self._local_action_pending:
@@ -664,6 +676,13 @@ class InputBubble(BubbleFrame):
 
     def complete_local_action(self, text):
         self._active_user_text=None; self._last_error_kind=None; self.response.setText(text); self.response_bubble.set_plain_text(text); self.response_bubble.set_copy_enabled(True); self.response_bubble.set_actions_enabled(True); self._position_response(); self.response_bubble.show(); self.conversation.add_assistant(text); self._refresh_history_window(); self._complete()
+
+    def show_proactive_message(self, text: str) -> bool:
+        if not isinstance(text, str) or not text.strip() or self.pending:
+            return False
+        self.response.setText(text); self.response_bubble.set_plain_text(text); self.response_bubble.set_copy_enabled(False); self.response_bubble.set_actions_enabled(False)
+        self._position_response(); self.response_bubble.show(); self._schedule_response_auto_hide()
+        return True
     def _schedule_response_auto_hide(self):
         self._response_generation += 1
         generation = self._response_generation
@@ -688,6 +707,7 @@ class InputBubble(BubbleFrame):
         self._retry_text = None
         self._pending_application_launch_request = None
         self._pending_service_restart_request = None
+        self._pending_file_rename_request = None
         self._cancel_requested = False
         self._last_error_kind = None
         if getattr(self, 'history_window', None) is not None: self.history_window.close()

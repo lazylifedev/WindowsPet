@@ -1,5 +1,6 @@
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QRect, QTimer, Qt
@@ -13,7 +14,8 @@ from .character_selection import CharacterSelection, resolve_selection, save_sel
 from .chat_bubble import InputBubble, chat_position, response_position
 from .paths import (assets_root, character_data_root, character_installed_root,
                     character_selection_path, character_working_root,
-                    local_skill_db_path, personal_memory_db_path, runtime_data_root)
+                    local_skill_db_path, personal_memory_db_path, proactive_state_db_path,
+                    personality_db_path, runtime_data_root)
 from .character_editor_window import CharacterEditorWindow
 from .storage import constrain_to_primary, load_position, save_position
 from .file_search_settings_window import FileSearchSettingsWindow
@@ -26,6 +28,7 @@ from .audit_log import JsonlAuditSink
 from .chat_application_launch_controller import ChatApplicationLaunchController
 from .chat_process_stop_controller import ChatProcessStopController
 from .chat_service_restart_controller import ChatServiceRestartController
+from .chat_file_rename_controller import ChatFileRenameController
 from .local_skill_router import LocalSkillRouter
 from .local_skill_store import LocalSkillStore
 from .memory.service import MemoryService
@@ -33,6 +36,9 @@ from .memory.sqlite_repository import SQLiteMemoryRepository
 from .memory_window import MemoryWindow
 from .ai_worker import AIWorker
 from .character_runtime_events import CharacterRuntimeEventDispatcher
+from .personality import RelationshipService, SQLitePersonalityRepository
+from .proactive import ProactiveEngine, ProactiveRuntime, ProactiveSettings, SQLiteProactiveRepository
+from .proactive.settings_window import ProactiveSettingsWindow
 
 
 def configure_application(app: QApplication) -> QApplication:
@@ -66,12 +72,18 @@ class PetWindow(QWidget):
         self._hover_timer = QTimer(self); self._hover_timer.setSingleShot(True); self._hover_timer.timeout.connect(self._trigger_hover_long)
         self._hover_triggered = False; self._last_hover_long_ms = -30000
         self.audit_sink = audit_sink or JsonlAuditSink(position_path.parent / "audit.jsonl")
+        self.personality_service = None
+        self.proactive_runtime = None
+        self.proactive_settings_window = None
+        self._proactive_timer = None
+        self._last_user_activity_at = datetime.now(timezone.utc)
         self.skill_store = LocalSkillStore(local_skill_db_path())
         self.memory_service = MemoryService(SQLiteMemoryRepository(personal_memory_db_path()))
-        self.input_bubble = InputBubble(self, worker_factory=lambda history: AIWorker(history, audit=self.audit_sink), local_skill_router=LocalSkillRouter(self.skill_store), memory_service=self.memory_service)
+        self.input_bubble = InputBubble(self, worker_factory=lambda history: AIWorker(history, audit=self.audit_sink, current_file_context=self.input_bubble.current_file_context, personality_context=self.personality_service.bounded_context() if self.personality_service is not None else None), local_skill_router=LocalSkillRouter(self.skill_store), memory_service=self.memory_service)
         self.launch_controller = ChatApplicationLaunchController(self.input_bubble.complete_local_action, self, self.audit_sink, show_status=self.input_bubble.show_local_action_status, skill_store=self.skill_store)
         self.process_stop_controller = ChatProcessStopController(self.input_bubble.complete_local_action, self, self.audit_sink)
         self.service_restart_controller = ChatServiceRestartController(self.input_bubble.complete_local_action, self, self.audit_sink)
+        self.file_rename_controller = ChatFileRenameController(self.input_bubble.complete_local_action, self, self.audit_sink)
         self.search_store = SearchResultStore()
         self.search_settings_window = None
         self.search_results_window = None
@@ -87,6 +99,7 @@ class PetWindow(QWidget):
         self.input_bubble.application_launch_ready.connect(self.launch_controller.request)
         self.input_bubble.process_stop_ready.connect(self.process_stop_controller.request)
         self.input_bubble.service_restart_ready.connect(self.service_restart_controller.request)
+        self.input_bubble.file_rename_ready.connect(self.file_rename_controller.request)
         self.input_bubble.cancel_processing_requested.connect(self.cancel_current_processing)
         self.input_bubble.api_settings_requested.connect(self.open_openai_settings)
         self._pet_hovered = False; self._input_hovered = False; self._input_has_focus = False
@@ -177,6 +190,7 @@ class PetWindow(QWidget):
         self._schedule_current_frame()
     def resizeEvent(self, event): self.label.resize(self.size()); self._show_frame() if self._animation else None
     def _activity(self):
+        self._last_user_activity_at = datetime.now(timezone.utc)
         if self._animation.event_id == "sleep": self.play("idle")
         if not self.input_bubble.isVisible() and not self.input_bubble.pending: self._last_activity.start(30000)
 
@@ -241,6 +255,7 @@ class PetWindow(QWidget):
         self.tray_menu.addSeparator()
         self.tray_menu.addAction("OpenAI API 設定", self.open_openai_settings)
         self.tray_menu.addAction("ファイル検索設定", self.open_file_search_settings)
+        self.tray_menu.addAction("自発発話設定", self.open_proactive_settings)
         self.tray_menu.addAction("PC調査情報", self.show_local_inspection)
         self.tray_menu.addAction("Personal Memory", self.show_memory)
         self.tray_menu.addAction("会話履歴", self.input_bubble.show_history)
@@ -336,12 +351,13 @@ class PetWindow(QWidget):
         menu.addAction("キャラクター設定", self.open_character_editor)
         menu.addAction('OpenAI API 設定', self.open_openai_settings)
         menu.addAction('ファイル検索設定', self.open_file_search_settings)
+        menu.addAction('自発発話設定', self.open_proactive_settings)
         menu.addAction('PC調査情報', self.show_local_inspection)
         menu.addAction('Personal Memory', self.show_memory)
         recent = menu.addAction('最近の検索結果', self.show_recent_search)
         recent.setEnabled(self.search_store.latest() is not None)
         cancel = menu.addAction('処理をキャンセル', self.cancel_current_processing)
-        cancel.setEnabled((self.input_bubble.pending or self.launch_controller.is_busy or self.process_stop_controller.is_busy or self.service_restart_controller.is_busy) and not self.input_bubble.cancel_requested)
+        cancel.setEnabled((self.input_bubble.pending or self.launch_controller.is_busy or self.process_stop_controller.is_busy or self.service_restart_controller.is_busy or self.file_rename_controller.is_busy) and not self.input_bubble.cancel_requested)
         menu.addSeparator()
         menu.addAction('チャットを開く', self.open_chat)
         menu.addAction('チャットを閉じる', self.close_chat)
@@ -355,6 +371,27 @@ class PetWindow(QWidget):
         if self.search_settings_window is None:
             self.search_settings_window = FileSearchSettingsWindow(parent=self)
         self.search_settings_window.show(); self.search_settings_window.raise_(); self.search_settings_window.activateWindow()
+
+    def start_proactive_runtime(self):
+        if self.proactive_runtime is not None:
+            return self.proactive_runtime
+        self.personality_service = RelationshipService(SQLitePersonalityRepository(personality_db_path()))
+        engine = ProactiveEngine(SQLiteProactiveRepository(proactive_state_db_path()), ProactiveSettings())
+        self.proactive_runtime = ProactiveRuntime(
+            engine, self.input_bubble.show_proactive_message,
+            last_activity=lambda: self._last_user_activity_at,
+            focus_mode=lambda: bool(self.input_bubble.input.hasFocus()),
+            critical_operation=lambda: bool(self.input_bubble.pending or self.launch_controller.is_busy or self.process_stop_controller.is_busy or self.service_restart_controller.is_busy or self.file_rename_controller.is_busy),
+        )
+        self._proactive_timer = QTimer(self); self._proactive_timer.setInterval(60_000); self._proactive_timer.timeout.connect(self.proactive_runtime.tick); self._proactive_timer.start()
+        QTimer.singleShot(0, self.proactive_runtime.startup)
+        return self.proactive_runtime
+
+    def open_proactive_settings(self):
+        runtime = self.start_proactive_runtime()
+        if self.proactive_settings_window is None:
+            self.proactive_settings_window = ProactiveSettingsWindow(runtime.engine.settings, runtime.update_settings, self)
+        self.proactive_settings_window.show(); self.proactive_settings_window.raise_(); self.proactive_settings_window.activateWindow()
     def open_openai_settings(self):
         if self.openai_settings_window is None:
             self.openai_settings_window = OpenAISettingsWindow(self)
@@ -386,6 +423,8 @@ class PetWindow(QWidget):
                 self.search_results_window = SearchResultsWindow(session)
             self.search_results_window.show(); self.search_results_window.raise_(); self.search_results_window.activateWindow()
     def _on_search_completed(self, result):
+        rows = result.get('results', [])
+        self.input_bubble.current_file_context = rows[0].get('full_path') if len(rows) == 1 and isinstance(rows[0], dict) else None
         session = self.search_store.add(result.get('query', ''), tuple(result.get('root_ids', ())), result)
         if self.search_results_window is None:
             self.search_results_window = SearchResultsWindow(session, self)
@@ -396,6 +435,9 @@ class PetWindow(QWidget):
     def cancel_current_processing(self):
         if self.service_restart_controller.is_busy:
             self.service_restart_controller.cancel()
+            return True
+        if self.file_rename_controller.is_busy:
+            self.file_rename_controller.cancel()
             return True
         if self.process_stop_controller.is_busy:
             self.process_stop_controller.cancel()
@@ -415,7 +457,10 @@ class PetWindow(QWidget):
         self._hover_timer.stop(); self._stop_frame_timer()
         self.process_stop_controller.shutdown()
         self.service_restart_controller.shutdown()
+        self.file_rename_controller.shutdown()
         self.launch_controller.shutdown()
+        if self._proactive_timer is not None: self._proactive_timer.stop()
+        if self.proactive_settings_window is not None: self.proactive_settings_window.close()
         self.input_bubble.close()
         if self.character_editor_window is not None: self.character_editor_window.shutdown()
         if getattr(self, "character_manager_window", None) is not None: self.character_manager_window.close()
@@ -442,7 +487,7 @@ def main() -> int:
         QMessageBox.critical(None, "Windows Pet", "Character assets could not be loaded.")
         return 1
     audit_sink = JsonlAuditSink(root / "data" / "audit.jsonl")
-    window = PetWindow(character.package.animations, root / "data" / "position.json", audit_sink, character_package=character.package, selection_path=character_selection_path(data_root), character_selection=selection); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.setup_system_tray(); window.show(); logging.info("pet window shown"); app.aboutToQuit.connect(window.input_bubble.close); return app.exec()
+    window = PetWindow(character.package.animations, root / "data" / "position.json", audit_sink, character_package=character.package, selection_path=character_selection_path(data_root), character_selection=selection); screen = app.primaryScreen().availableGeometry(); window.move(constrain_to_primary(load_position(window.position_path), screen, window.width())); window.setup_system_tray(); window.show(); window.start_proactive_runtime(); logging.info("pet window shown"); app.aboutToQuit.connect(window.input_bubble.close); return app.exec()
 
 
 if __name__ == "__main__": raise SystemExit(main())

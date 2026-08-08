@@ -39,6 +39,7 @@ class ProactiveCandidate:
 @dataclass(frozen=True)
 class ProactiveSettings:
     enabled: bool = True
+    speech_level: str = "normal"
     minimum_cooldown_minutes: int = 30
     daily_cap: int = 3
     quiet_start: time | None = None
