@@ -1,9 +1,9 @@
 # WindowsPet PowerShell実行設計
 
-**Version:** 0.2.1\
+**Version:** 0.3.0\
 **Date:** 2026-08-08\
 **Audience:** ChatGPT / Codex / WindowsPet developers\
-**Status:** Design baseline; runtime not yet implemented.\
+**Status:** Phase 3B state-change runtime implemented; Phase 4A one-shot Elevation Broker foundation implemented with Fake/read-only validation. Real UAC and real administrative operations are not executed by the development test path.\
 **Related:** `WindowsPet_設計仕様書.md`
 
 > **AIへの最重要指示:** PowerShellをWindowsPetの強力な実行バックエンドとして利用するが、AIへ無制限のshell権限を渡さない。AIは構造化された操作またはexact scriptを提案し、WindowsPetがPolicy Gate、確認、one-shot ExecutionGrant、実行前再検証、結果検証、監査を管理する。
@@ -788,6 +788,19 @@ get_disk_usage
 - ACL / ownership
 - exact proposal/hash validation across elevation boundary
 
+Phase 4A foundation contract:
+
+- Main creates an immutable `ElevationRequest` only after the existing `ConfirmationSession` and `ExecutionGrant` approval.
+- `ElevationEnvelope` is UTF-8 canonical JSON with sorted keys, compact separators, strict required/unknown-field validation, bounded size/depth, expiry, nonce, parameter digest, and no script body or secret.
+- The envelope is written to a random file under the current user's local application-data elevation directory with exclusive creation, bounded size, post-write SHA-256, and reparse-point/path-boundary checks.
+- The Broker accepts only the local expected helper identity and the `restart_service` operation. It reconstructs the local template, validates canonical service parameters, compares the exact script SHA-256, requires `system_change` and `requires_admin == true`, claims the grant and nonce atomically, then dispatches exactly one operation and exits.
+- Cross-process replay protection is provided by exclusive claim files under `AppLocalData\WindowsPet\elevation\claims`; only hash identifiers are written. A second Broker process receives `grant_reused` or `replayed_nonce` and its execution count is zero.
+- Main validates `request_id`, `operation_id`, and script hash in the structured result and requires an independent read-only verifier before reporting success. Broker exit code alone is insufficient.
+- `FakeElevationLauncher`／`FakeElevatedExecutor` cover approval, rejection, replay, UAC-cancel simulation, nonzero exit, verification failure, and process-race tests. `WindowsElevationLauncher` is a native `ShellExecuteExW`/`runas` skeleton; it is not invoked by automated tests.
+- The dedicated `WindowsPet.ElevationBroker.exe` PyInstaller spec is separate from the GUI executable. The Broker has no AI, API, Web, network IPC, TCP listener, `shell=True`, `cmd.exe /c`, `-EncodedCommand`, or PowerShell `Start-Process -Verb RunAs` path.
+
+Phase 4A acceptance status: Fake and read-only validation complete; real UAC prompt, real elevation, and real `Restart-Service` remain pending by design. Phase 3B's latest-build real `Restart-Service` confirmation is also pending.
+
 ### Phase 5 — Memory and shared procedures
 
 - local procedure memory
@@ -808,6 +821,8 @@ get_disk_usage
 - exit codeと対象状態の両方を検証する。
 - 通常監査へscript本文とraw outputを保存しない。
 - Fake testで実PowerShellを起動せずに主要経路を検証できる。
+- Elevation Envelopeの同一grant／nonceを別Brokerプロセスへ渡しても一回だけclaimされ、競合時もexecution countが一回以下である。
+- Broker resultのrequest／operation／script hashをMain側で照合し、独立read-only verificationが成功するまで成功表示しない。
 
 ## 22. Document governance
 
@@ -818,3 +833,4 @@ Canonical file: `docs/WindowsPet_PowerShell実行設計.md`. Keep the filename s
 - **0.1.0 — 2026-08-07:** Initial PowerShell execution design. Defines structured and reviewed-script modes, exact-script hash binding, Policy/Confirmation/Grant flow, backend selection, safe invocation, secrets, output, cancellation, privilege, verification, audit, memory, testing, and phased implementation.
 - **0.2.0 — 2026-08-08:** Promoted one-shot UAC elevation from a future concept to a core administration capability implemented alongside state-changing PowerShell, supporting the Local PC full-capability principle without granting persistent administrator rights.
 - **0.2.1 — 2026-08-08:** Adopted stable Git-canonical filenames and aligned references with the Local-first WindowsPet architecture without changing PowerShell safety boundaries.
+- **0.3.0 — 2026-08-08:** Implemented the Phase 4A one-shot Elevation Broker foundation: canonical Envelope, secured payload file, exact catalog/hash validation, cross-process file-backed grant/nonce claims, Fake/native launcher boundary, structured result binding, independent verification hook, Qt lifecycle, and dedicated Broker build target. Real UAC and real administrative operations remain unexecuted.

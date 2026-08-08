@@ -4,7 +4,7 @@
 **Version:** 0.4.0\
 **Date:** 2026-08-08\
 **Audience:** ChatGPT / Codex / WindowsPet developers\
-**Status:** Confirmed local application launch implemented; chat-to-action and PowerShell runtime are next.
+**Status:** Phase 3B confirmed service-restart implementation is retained; Phase 4A one-shot Elevation Broker foundation is implemented with Fake/read-only validation. Real UAC and real administrative restart remain intentionally unexecuted.
 
 > **AIへの最重要指示:** WindowsPetを単なるデスクトップペット、ChatGPTクライアント、チャットUI、読み取り専用検索アプリとして扱わないこと。WindowsPetはローカルPCで「生きる」一貫した知性主体であり、ユーザーとは主従ではなくパートナーとして接する。普段は控えめでユーザーの意思と集中を尊重し、頼まれたときは最強の情シスとして、曖昧な困りごとの本質をPCの事実・会話・記憶から推定し、知らないことも自ら調査・推論・計画し、必要ならWebや外部AIを拡張頭脳として利用する。確認不要な調査は主体的に進め、確認が必要な副作用だけを適切な時点で提示し、承認された範囲を実行・検証する。作業後は内部的にReflectionを行い、経験を次回へ活かせる知識へ変換する。ユーザーから見える知性の主体は常にWindowsPetであり、外部AIモデルを別人格・上司・別の相談相手として見せない。
 
@@ -326,6 +326,7 @@ PowerShellの詳細は `WindowsPet_PowerShell実行設計.md` を正本とする
 - 確認されたスクリプトと実行されるスクリプトをSHA-256で束縛する。
 - `shell=True`、`cmd.exe`経由、`-EncodedCommand`、難読化、表示していない追加コマンドは禁止する。
 - 標準ユーザーで実行し、管理者操作は専用の昇格経路と別確認を必要とする。
+- 管理者操作は常駐helperや汎用shellではなく、専用Brokerへ一回限りのEnvelopeを渡し、UAC後にexact proposal／template／script hashを再検証して一操作だけ実行する。
 - 出力、終了コード、対象状態を検証し、実行結果だけで成功扱いにしない。
 - スクリプト本文、秘密情報、個人情報を通常の監査ログへ保存しない。監査はハッシュと安全なメタデータを中心とする。
 
@@ -459,6 +460,10 @@ chat-serverは複数WindowsPetの**集合知（Global Brain / Shared Knowledge�
 - Fake processによるProposal／Grant／Executor統合テスト。
 - 実行・検証監査イベント型とInMemory／Null／JSONL Sinkの基礎。
 - PyInstallerによるWindows実行ファイル生成。
+- Phase 3A／3B: snapshot、canonical service identity、protected target policy、ConfirmationSession、one-shot ExecutionGrant、exact script SHA-256、`shell=False`、restricted environment、実行前再検証、bounded verification polling、協調的cancel／shutdownを実装済み。Phase 3Bの最新buildによる実Restart-Service実機確認はpending。
+- Phase 4A: `src/windows_pet/elevation/` に immutable `ElevationRequest`／`ElevationEnvelope`、canonical JSON strict schema、ユーザー専用一時Envelopeファイル、Broker identity validation、`restart_service` allowlist、Broker側exact template/hash／parameter再検証、structured result、Main側result binding／read-only verifier、Native `ShellExecuteExW` skeleton、Fake launcher／executor、QThread subclass lifecycleを実装済み。
+- Phase 4A replay protection: `AppLocalData\WindowsPet\elevation\claims` の排他的ファイル作成による grant／nonce のcross-process one-shot claimを実装。claim領域にはhashだけを保存し、raw script、secret、raw outputは保存しない。
+- Phase 4Aの自動検証では実UAC、実Elevation、Restart-Service、Stop-Service、Start-Service、その他の管理者変更を実行していない。
 
 Implementation baseline: `b7e283cd9168c33531ce49f17a194db1dff08b0a` (`fix: make confirmed launch executable and tested`).\
 Validation at baseline: `102 passed`, compileall success, build success.
@@ -475,7 +480,7 @@ Validation at baseline: `102 passed`, compileall success, build success.
 - Uninstall情報から実行ファイルを推定していない。
 - PATHまたはApp Pathsへ登録されていないアプリは名前検索で見つからない場合がある。
 - local persistent memory、revalidation、chat-server sharingは未実装。
-- File server、Teams connector、UI automation、UAC brokerは未実装。
+- File server、Teams connector、UI automationは未実装。Phase 4A Brokerは基盤とFake/read-only検証までで、実UAC接続は未実行。
 
 ## 16. Roadmap
 
@@ -485,7 +490,7 @@ Validation at baseline: `102 passed`, compileall success, build success.
 4. Local Intelligence Runtime：高速intent routing、Local Skill/Memory、軽量ローカルAI、confidence評価、クラウドエスカレーション判定。
 5. Research Orchestrator：未知タスク分解、ローカル調査、公式Web／一般Web検索、根拠管理、re-plan loop。
 6. PowerShellExecutionProposal、Policy、確認画面、Executor、verification、auditの実装。
-7. UAC Elevation Brokerを変更系PowerShellと並行して実装し、管理者操作をone-shotで昇格可能にする。
+7. Phase 4A基盤を実UAC／署名済みBrokerへ接続し、read-only verificationを既存のservice restart UIへ統合する。
 8. 低リスクPowerShell Tool: process、service、network、event log、winget、registry read。
 9. 変更系PowerShell Tool: service、startup、registry write、scheduled task、Windows settings、network/firewall/ACL。
 10. Reflection pipeline、local persistent memory、revalidation、Memory UI、API context compression、successful-procedure distillation。

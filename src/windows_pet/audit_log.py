@@ -43,6 +43,19 @@ class AuditEventType(str, Enum):
     POWERSHELL_VERIFICATION_SUCCEEDED = "powershell_verification_succeeded"
     POWERSHELL_VERIFICATION_FAILED = "powershell_verification_failed"
     POWERSHELL_TEMP_CLEANUP_FAILED = "powershell_temp_cleanup_failed"
+    ELEVATION_REQUESTED = "elevation_requested"
+    ELEVATION_ENVELOPE_CREATED = "elevation_envelope_created"
+    ELEVATION_LAUNCH_STARTED = "elevation_launch_started"
+    ELEVATION_UAC_CANCELLED = "elevation_uac_cancelled"
+    ELEVATION_BROKER_STARTED = "elevation_broker_started"
+    ELEVATION_VALIDATION_REJECTED = "elevation_validation_rejected"
+    ELEVATION_EXECUTION_STARTED = "elevation_execution_started"
+    ELEVATION_EXECUTION_SUCCEEDED = "elevation_execution_succeeded"
+    ELEVATION_EXECUTION_FAILED = "elevation_execution_failed"
+    ELEVATION_RESULT_RECEIVED = "elevation_result_received"
+    ELEVATION_VERIFICATION_SUCCEEDED = "elevation_verification_succeeded"
+    ELEVATION_VERIFICATION_FAILED = "elevation_verification_failed"
+    ELEVATION_CLEANUP_FAILED = "elevation_cleanup_failed"
 
 
 @dataclass(frozen=True)
@@ -66,6 +79,9 @@ class AuditEvent:
     exit_code: int | None = None
     verification_result: str = ""
     item_count: int | None = None
+    request_id: str = ""
+    template_id: str = ""
+    template_version: str = ""
 
     def __post_init__(self):
         if self.event_type not in {item.value for item in AuditEventType}:
