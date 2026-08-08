@@ -27,6 +27,13 @@ def runtime_data_root() -> Path:
     location = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
     return Path(location) if location else application_root()
 
+
+def local_skill_db_path() -> Path:
+    location = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+    if location:
+        return Path(location) / "skills.sqlite3"
+    return Path.home() / "WindowsPet" / "skills.sqlite3"
+
 def assets_root() -> Path:
     return resource_path("assets/animations")
 

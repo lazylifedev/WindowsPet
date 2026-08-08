@@ -52,6 +52,7 @@ class AppCandidate:
     executable_path: str = ""
     executable_exists: bool | None = None
     install_location: str = ""
+    provenance_hash: str = ""
 
 
 @dataclass(frozen=True)

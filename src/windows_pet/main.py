@@ -13,7 +13,7 @@ from .character_selection import CharacterSelection, resolve_selection, save_sel
 from .chat_bubble import InputBubble, chat_position, response_position
 from .paths import (assets_root, character_data_root, character_installed_root,
                     character_selection_path, character_working_root,
-                    runtime_data_root)
+                    local_skill_db_path, runtime_data_root)
 from .character_editor_window import CharacterEditorWindow
 from .storage import constrain_to_primary, load_position, save_position
 from .file_search_settings_window import FileSearchSettingsWindow
@@ -26,6 +26,8 @@ from .audit_log import JsonlAuditSink
 from .chat_application_launch_controller import ChatApplicationLaunchController
 from .chat_process_stop_controller import ChatProcessStopController
 from .chat_service_restart_controller import ChatServiceRestartController
+from .local_skill_router import LocalSkillRouter
+from .local_skill_store import LocalSkillStore
 from .ai_worker import AIWorker
 from .character_runtime_events import CharacterRuntimeEventDispatcher
 
@@ -61,8 +63,9 @@ class PetWindow(QWidget):
         self._hover_timer = QTimer(self); self._hover_timer.setSingleShot(True); self._hover_timer.timeout.connect(self._trigger_hover_long)
         self._hover_triggered = False; self._last_hover_long_ms = -30000
         self.audit_sink = audit_sink or JsonlAuditSink(position_path.parent / "audit.jsonl")
-        self.input_bubble = InputBubble(self, worker_factory=lambda history: AIWorker(history, audit=self.audit_sink))
-        self.launch_controller = ChatApplicationLaunchController(self.input_bubble.complete_local_action, self, self.audit_sink, show_status=self.input_bubble.show_local_action_status)
+        self.skill_store = LocalSkillStore(local_skill_db_path())
+        self.input_bubble = InputBubble(self, worker_factory=lambda history: AIWorker(history, audit=self.audit_sink), local_skill_router=LocalSkillRouter(self.skill_store))
+        self.launch_controller = ChatApplicationLaunchController(self.input_bubble.complete_local_action, self, self.audit_sink, show_status=self.input_bubble.show_local_action_status, skill_store=self.skill_store)
         self.process_stop_controller = ChatProcessStopController(self.input_bubble.complete_local_action, self, self.audit_sink)
         self.service_restart_controller = ChatServiceRestartController(self.input_bubble.complete_local_action, self, self.audit_sink)
         self.search_store = SearchResultStore()

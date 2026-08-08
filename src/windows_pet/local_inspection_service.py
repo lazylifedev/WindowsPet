@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -10,6 +12,7 @@ import unicodedata
 from pathlib import Path
 from typing import Callable
 from .cancellation import CancellationToken
+from .shell_link import resolve_shortcut
 
 from .local_inspection_models import (AppCandidate, InspectionErrorCode, InspectionSnapshot,
     PartialError, PathInspection, SystemInfo, WingetStatus)
@@ -27,11 +30,13 @@ def _application_key(value: str) -> str:
 
 class LocalInspectionService:
     def __init__(self, env: dict[str, str] | None = None, exists: Callable[[str], bool] | None = None,
-                 which: Callable[[str], str | None] | None = None, run_command=None):
+                 which: Callable[[str], str | None] | None = None, run_command=None,
+                 shortcut_reader: Callable[[str], str | None] | None = None):
         self.env = env if env is not None else dict(os.environ)
         self.exists = exists or os.path.isdir
         self.which = which or shutil.which
         self.run_command = run_command or subprocess.run
+        self.shortcut_reader = shortcut_reader or resolve_shortcut
 
     def inspect(self, token: CancellationToken | None = None) -> InspectionSnapshot:
         token = token or CancellationToken()
@@ -86,9 +91,15 @@ class LocalInspectionService:
                                 def val(n: str) -> str:
                                     try: return str(winreg.QueryValueEx(child, n)[0])
                                     except (OSError, TypeError): return ""
-                                exe = val("") if area == "app_paths" else ""
+                                if area == "app_paths":
+                                    exe = val("")
+                                    executable_name = name
+                                else:
+                                    exe = self._display_icon_path(val("DisplayIcon"))
+                                    executable_name = Path(exe).name if exe else name
                                 install = val("InstallLocation") if area == "installed_apps" else ""
-                                results.append(AppCandidate(display.strip(), val("DisplayVersion"), val("Publisher"), source, name, exe, bool(exe) and Path(exe).exists(), install))
+                                results.append(AppCandidate(display.strip(), val("DisplayVersion"), val("Publisher"), source,
+                                                             executable_name, exe, bool(exe) and Path(exe).is_file(), install))
                 except FileNotFoundError: continue
                 except PermissionError: errors.append(PartialError(source, InspectionErrorCode.ACCESS_DENIED))
             return results
@@ -103,10 +114,37 @@ class LocalInspectionService:
             try:
                 for path in Path(folder).rglob("*"):
                     if token and token.is_cancelled: break
-                    if path.is_symlink() or path.suffix.lower() not in (".lnk", ".url"): continue
-                    found.append(AppCandidate(path.stem, source="start_menu", executable_name=path.name))
+                    if path.is_symlink() or path.suffix.casefold() != ".lnk": continue
+                    target = self.shortcut_reader(str(path))
+                    if not target:
+                        continue
+                    target_path = Path(target)
+                    provenance = hashlib.sha256(str(path).casefold().encode("utf-8", "strict")).hexdigest()
+                    found.append(AppCandidate(path.stem, source="start_menu", executable_name=target_path.name,
+                                              executable_path=target, executable_exists=target_path.is_file(),
+                                              provenance_hash=provenance))
             except (OSError, PermissionError): errors.append(PartialError("start_menu", InspectionErrorCode.ACCESS_DENIED))
         return found
+
+    @staticmethod
+    def _display_icon_path(value: str) -> str:
+        """Extract only a literal .exe path and optional numeric icon index."""
+        text = value.strip()
+        if not text:
+            return ""
+        if text.startswith('"'):
+            end = text.find('"', 1)
+            if end < 0:
+                return ""
+            path, suffix = text[1:end], text[end + 1:].strip()
+            if suffix and not re.fullmatch(r",\s*-?\d+", suffix):
+                return ""
+        else:
+            match = re.fullmatch(r"(.+?\.exe)(?:\s*,\s*-?\d+)?", text, re.IGNORECASE)
+            if not match:
+                return ""
+            path = match.group(1)
+        return path if Path(path).suffix.casefold() == ".exe" else ""
 
     def _winget(self, errors: list[PartialError], token=None) -> WingetStatus:
         executable = self.which("winget")

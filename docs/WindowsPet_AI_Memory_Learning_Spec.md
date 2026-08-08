@@ -1,6 +1,6 @@
 # WindowsPet AI Memory / Learning / Personality / Shared Knowledge Specification
 
-Version: 0.3\
+Version: 0.4\
 Date: 2026-08-08\
 Status: Design baseline / implementation reference
 Related: `WindowsPet_設計仕様書.md`
@@ -813,6 +813,8 @@ Images, audio, screenshots and full file contents must not be retained merely fo
 - reuse known commands without LLM,
 - memory strength / last-used fields.
 
+Current implementation: WindowsPet has a deterministic built-in application-launch registry and a local SQLite Skill store. Learned aliases store only an abstract intent/target and normalized alias; they never store conversation text, secrets, or machine-specific executable paths. A learned hit still enters the existing resolver, policy, confirmation, one-shot Grant, executor, and verification flow.
+
 ### Phase 2 - Personal memory
 
 - short-term and long-term distinction,
@@ -935,3 +937,4 @@ The canonical copy is `docs/WindowsPet_AI_Memory_Learning_Spec.md` in the `lazyl
 ## 24. Revision history
 
 - **0.3 — 2026-08-08:** Added WindowsPet intelligence identity, Local-first Primary Brain, Luna/Terra/Sol cognitive-extension routing, local-PC-assisted intent inference, explicit Reflection pipeline, collective-intelligence privacy boundary, and Git-first documentation governance.
+- **0.4 — 2026-08-08:** Recorded the Phase 1 local deterministic launch routing and SQLite Skill store implementation boundary.

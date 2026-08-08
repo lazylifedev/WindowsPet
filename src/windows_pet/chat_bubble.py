@@ -365,8 +365,8 @@ class InputBubble(BubbleFrame):
     focus_state_changed = Signal(bool)
     draft_state_changed = Signal(bool)
     closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict); api_settings_requested=Signal(); application_launch_requested=Signal(object); application_launch_ready=Signal(object); process_stop_ready=Signal(object); service_restart_ready=Signal(object); cancel_processing_requested=Signal()
-    def __init__(self, pet, worker_factory=AIWorker):
-        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self._pending=False; self._local_action_pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False; self._active_user_text=None; self._retry_text=None; self._last_error_kind=None; self._pending_application_launch_request=None; self._pending_process_stop_request=None; self._pending_service_restart_request=None
+    def __init__(self, pet, worker_factory=AIWorker, local_skill_router=None):
+        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self.local_skill_router=local_skill_router; self._pending=False; self._local_action_pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False; self._active_user_text=None; self._retry_text=None; self._last_error_kind=None; self._pending_application_launch_request=None; self._pending_process_stop_request=None; self._pending_service_restart_request=None
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.card=QFrame(self); self.card.setStyleSheet('QFrame{background:#20242b;border:0;}')
         # A layered top-level window must never receive an effect whose expanded
@@ -468,6 +468,10 @@ class InputBubble(BubbleFrame):
         if not self._can_start_request():return False
         text=self.input.toPlainText().strip()
         if not text:return False
+        if self.local_skill_router is not None:
+            match = self.local_skill_router.route(text)
+            if match is not None:
+                return self._start_local_action(text, match.request)
         if not is_api_key_configured():
             self._last_error_kind = "missing_key"
             self._show_response_status("OpenAI APIキーを設定してください。\n入力内容はそのまま残しています。")
@@ -477,6 +481,13 @@ class InputBubble(BubbleFrame):
         started = self._start_request(text, clear_input=True)
         if started: self._retry_text=None; self._last_error_kind=None
         return started
+    def _start_local_action(self, text, request):
+        if not text or not self._can_start_request(): return False
+        self._cancel_requested=False; self._active_user_text=text; self._pending_application_launch_request=request
+        self.input.clear(); self.conversation.add_user(text); self._local_action_pending=True; self.send_started.emit(); self.pet.play('thinking')
+        self._show_response_status('安全なアプリ起動フローを準備しています…'); self._update_primary_button(); self._refresh_history_window()
+        QTimer.singleShot(0, self._emit_pending_application_launch_request)
+        return True
     def retry_last_request(self):
         text = self._retry_text
         if not text:return False

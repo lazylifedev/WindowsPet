@@ -11,6 +11,7 @@ class ApplicationLaunchRequest:
     application_name: str
     exact_path: str | None
     source: str = "chat"
+    user_text: str = ""
 
 
 def _normal(value: str) -> str:
@@ -43,4 +44,6 @@ def parse_application_launch_request(arguments, history) -> ApplicationLaunchReq
             raise ValueError("invalid_exact_path")
         if _normal(exact_path) not in _user_paths(history):
             exact_path = None
-    return ApplicationLaunchRequest(name.strip(), exact_path)
+    user_text = next((str(message.get("content", "")).strip() for message in reversed(history)
+                      if message.get("role") == "user" and str(message.get("content", "")).strip()), "")
+    return ApplicationLaunchRequest(name.strip(), exact_path, "chat", user_text)

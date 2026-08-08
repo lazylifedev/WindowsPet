@@ -102,7 +102,8 @@ class ApplicationCandidateResolver:
     @staticmethod
     def _generic_sort_key(candidate: AppCandidate, canonical_path: str, query: str) -> tuple:
         source_rank = {"app_paths_hklm_64": 0, "app_paths_hklm_32": 1, "app_paths_hkcu": 2,
-                       "install_location": 3, "path": 4}
+                       "installed_apps_hklm_64": 3, "installed_apps_hklm_32": 4, "installed_apps_hkcu": 5,
+                       "install_location": 6, "path": 7, "start_menu": 8}
         query_key = normalize_application_name(query)
         display, stem = normalize_application_name(candidate.display_name), normalize_application_name(candidate.executable_name)
         match_rank = (1 if display == query_key else 2 if stem == query_key else 3 if display.startswith(query_key) else

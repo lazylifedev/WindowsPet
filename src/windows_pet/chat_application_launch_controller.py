@@ -19,7 +19,7 @@ class ChatApplicationLaunchController(QObject):
                  proposal_factory=ApplicationLaunchProposalFactory,
                  confirmation_gate=None, executor=None,
                  launch_worker_factory=ApplicationLaunchWorker, thread_factory=QThread,
-                 token_factory=CancellationToken):
+                 token_factory=CancellationToken, skill_store=None):
         super().__init__(parent)
         self.complete, self.show_status = complete, show_status or (lambda _: None)
         self.audit = audit or NullAuditSink(); self.validator = validator or ApplicationLaunchValidator()
@@ -29,9 +29,12 @@ class ChatApplicationLaunchController(QObject):
         self.gate = confirmation_gate or ConfirmationGate(audit=self.audit)
         self.executor = executor or ApplicationLaunchExecutor(self.gate.grants, validator=self.validator, audit=self.audit)
         self.launch_worker_factory, self.thread_factory, self.token_factory = launch_worker_factory, thread_factory, token_factory
+        self.skill_store = skill_store
         self.resolver_thread = self.resolver_worker = self.resolver_token = None
         self.launch_thread = self.launch_worker = self.launch_token = None
         self._grant_id = None
+        self._current_request = None
+        self._current_candidate = None
         self._busy = False
 
     @property
@@ -39,6 +42,7 @@ class ChatApplicationLaunchController(QObject):
 
     def request(self, request):
         if self._busy: return False
+        self._current_request = request
         self._busy = True; self.resolver_token = self.token_factory(); self.show_status("アプリの起動確認を準備しています。")
         thread = self.resolver_thread = self.thread_factory(self)
         worker = self.resolver_worker = self.resolver_worker_factory(self.resolver, request, self.resolver_token)
@@ -76,6 +80,7 @@ class ChatApplicationLaunchController(QObject):
             dialog = self.selection_dialog_factory(outcome.candidates, parent=self.parent())
             if dialog.exec() != dialog.Accepted or dialog.selected_candidate is None: self._finish("アプリの起動をキャンセルしました。"); return
             candidate = dialog.selected_candidate
+        self._current_candidate = candidate
         target, _ = self.validator.validate(candidate)
         if target is None: self._finish("起動条件が変わったため、もう一度依頼してください。"); return
         proposal = self.proposal_factory().create(secrets.token_urlsafe(12), candidate, target)
@@ -93,6 +98,12 @@ class ChatApplicationLaunchController(QObject):
         worker.finished.connect(worker.deleteLater); thread.finished.connect(lambda: self._cleanup_launch_thread(thread)); thread.finished.connect(thread.deleteLater); thread.start()
 
     def _launched(self, outcome):
+        request, candidate = self._current_request, self._current_candidate
+        if self.skill_store is not None and request is not None and candidate is not None and request.user_text and request.exact_path is None:
+            if outcome.status in (ApplicationLaunchStatus.STARTED, ApplicationLaunchStatus.HANDED_OFF):
+                self.skill_store.record_success(intent="launch_app", target_type="application", target=request.application_name, alias=request.user_text)
+            elif outcome.status is ApplicationLaunchStatus.FAILED:
+                self.skill_store.record_failure(intent="launch_app", target_type="application", target=request.application_name, alias=request.user_text)
         messages = {ApplicationLaunchStatus.STARTED: "アプリを起動しました。", ApplicationLaunchStatus.HANDED_OFF: "アプリへ起動要求を渡しました。", ApplicationLaunchStatus.CANCELLED: "アプリの起動をキャンセルしました。", ApplicationLaunchStatus.REJECTED: "このアプリは起動できません。", ApplicationLaunchStatus.FAILED: "アプリを起動できませんでした。"}
         if outcome.status is ApplicationLaunchStatus.REJECTED and outcome.result_code == "expired":
             self._finish("確認の有効期限が切れました。もう一度依頼してください。")

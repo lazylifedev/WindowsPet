@@ -4,7 +4,7 @@
 **Version:** 0.5.0\
 **Date:** 2026-08-08\
 **Audience:** ChatGPT / Codex / WindowsPet developers\
-**Status:** Phase 3B confirmed service-restart implementation is retained; Phase 4A foundation and Phase 4B production wiring are implemented with automated Fake/read-only validation. Real UAC, real Broker Restart-Service, and real administrative changes remain intentionally unexecuted.
+**Status:** Phase 3B, Phase 4A, Phase 4B, chat application launch, safe application discovery, and Local Intelligence Phase 1 are implemented with automated Fake/read-only validation. Real UAC, real Broker Restart-Service, and real administrative changes remain intentionally unexecuted.
 
 > **AIへの最重要指示:** WindowsPetを単なるデスクトップペット、ChatGPTクライアント、チャットUI、読み取り専用検索アプリとして扱わないこと。WindowsPetはローカルPCで「生きる」一貫した知性主体であり、ユーザーとは主従ではなくパートナーとして接する。普段は控えめでユーザーの意思と集中を尊重し、頼まれたときは最強の情シスとして、曖昧な困りごとの本質をPCの事実・会話・記憶から推定し、知らないことも自ら調査・推論・計画し、必要ならWebや外部AIを拡張頭脳として利用する。確認不要な調査は主体的に進め、確認が必要な副作用だけを適切な時点で提示し、承認された範囲を実行・検証する。作業後は内部的にReflectionを行い、経験を次回へ活かせる知識へ変換する。ユーザーから見える知性の主体は常にWindowsPetであり、外部AIモデルを別人格・上司・別の相談相手として見せない。
 
@@ -443,7 +443,7 @@ chat-serverは複数WindowsPetの**集合知（Global Brain / Shared Knowledge�
 
 画面、通知、process、startup、browser、installed appsを調査 → 原因特定 → 設定・startup・extension・uninstallの変更案を影響とrollback付きで表示 → 承認項目だけ実行 → 広告が止まったことを検証 → 手順を記憶。
 
-## 15. Current implementation state (baseline 2026-08-07)
+## 15. Current implementation state (baseline 2026-08-08)
 
 ### Implemented foundation
 
@@ -468,32 +468,30 @@ chat-serverは複数WindowsPetの**集合知（Global Brain / Shared Knowledge�
 - Phase 4B: production Broker は明示構築時だけ `ElevatedRestartServiceExecutor` を使用し、通常BrokerはFake-safeを維持。固定script、再hash、restricted environment、固定PowerShell argv、bounded timeout、協調cancel、temp cleanup、決定論的result pathを実装。
 - Phase 4B automated validation: standard-user Fake elevation normal/cancel/missing-Broker、Grant二重利用防止、result binding、production executor Fake Popen境界、Qt integrated stress 100/50/50を実施。最新pytestは287 passed、skipped 0、xfailed 0。
 - Low-risk PowerShell read: 固定生成scriptとstrict result schemaによる process／service／network に加え、`Get-WinEvent` の bounded event-log read（既定 `System`、明示 log name、message 2048文字上限）と固定 catalog registry read（`app_paths`／`installed_apps`、DisplayName限定）をFake/read-only検証済み。
-- Low-risk registry read: `app_paths`／`installed_apps` の固定 catalog だけを対象にし、任意 registry path、secret-oriented key、write は受け付けない bounded read と strict result schema をFake検証済み。
+- Low-risk registry read: `app_paths`／`installed_apps` の固定 catalog だけを対象にし、DisplayName／DisplayIcon／InstallLocation以外の任意 registry path、secret-oriented key、write は受け付けない bounded read と strict result schema をFake検証済み。
 - Low-risk winget read/search: package name metadata search only。固定 `winget search --name`、source agreement acceptance、non-interactive、source固定、件数上限、30秒timeout、strict result schemaを実機read-only／Fake検証済み。install／upgrade／uninstall／source変更は未実装。
+- Chat application launch: `request_application_launch` is locally validated and handed to the existing resolver、confirmation、one-shot Grant、`ApplicationLaunchExecutor`、read-only verification flow. The AI Tool never receives execution authority.
+- Application discovery: local absolute paths、trusted Windows catalogue、PATH/App Paths、read-only Start Menu `.lnk` target resolution、installed-app `DisplayIcon`/`InstallLocation` metadata are candidate sources. Shortcut arguments、URL/UNC/device targets、untrusted registry command strings are rejected.
+- Local Intelligence Phase 1: deterministic built-in launch aliases and local SQLite learned aliases with success/failure counts、last-used timestamp、memory strength are implemented. Learned aliases still pass resolver、Policy、Confirmation、Grant、Executor、and Verification.
 
-Implementation baseline: `b7e283cd9168c33531ce49f17a194db1dff08b0a` (`fix: make confirmed launch executable and tested`).\
-Validation at baseline: `102 passed`, compileall success, build success.
+Implementation baseline: current Git `main` through the Local Intelligence Phase 1 delivery.\
+Validation baseline: Fake/read-only discovery and local-learning tests pass; full acceptance is recorded in the delivery report for the current commit.
 
 ### Current limitations
 
-- チャットからアプリ起動Toolへはまだ接続していない。
-- AIへ公開されているToolは読み取り専用ファイル検索が中心。
-- PowerShell実行runtimeは未実装。
-- 本番の`LocalInspectionWindow`生成時に永続AuditSinkをまだ接続していない。
+- AIへ公開されているToolは読み取り専用のファイル／Windows状態調査と、ローカル安全境界へhandoffする確認付き操作に限定される。
+- 自由形式のPowerShell実行runtimeは未実装。既存の固定・構造化readと確認付き process/service 操作はこの制限の対象外。
 - 実UAC、署名済みBroker、実管理者変更の手動確認は未実施。
 - UI／QThreadの製品フローを網羅する統合テストは不足している。
-- Start Menuの`.lnk`リンク先を解決していない。
-- Uninstall情報から実行ファイルを推定していない。
-- PATHまたはApp Pathsへ登録されていないアプリは名前検索で見つからない場合がある。
-- local persistent memory、revalidation、chat-server sharingは未実装。
-- File server、Teams connector、UI automation、low-risk PowerShell Tool群は未実装。
+- literal `DisplayIcon` と安全な `InstallLocation` から決定論的に候補化できない installed app は名前検索で見つからない場合がある。`UninstallString`/`QuietUninstallString` は意図的に利用しない。
+- Personal Memory、chat-server sharing、Reflection、cloud/global skill sharingは未実装。Local Skill DBは実行学習専用で会話全文を保存しない。
+- File server、Teams connector、UI automation、自由形式のPowerShell Tool群は未実装。
 
 ## 16. Roadmap
 
-1. 本番AuditSink接続、Grant consume/reject監査、UI/QThread統合テスト。
-2. チャットのアプリ起動要求を既存確認付きApplicationLaunchExecutorへ接続。
-3. フルパス直接指定、Start Menu shortcut解決、installed appからの実行ファイル探索。
-4. Local Intelligence Runtime：高速intent routing、Local Skill/Memory、軽量ローカルAI、confidence評価、クラウドエスカレーション判定。
+1. 本番AuditSink接続、Grant consume/reject監査、UI/QThread統合テスト（基礎実装・Fake検証済み、製品全体の網羅は継続）。
+2. チャットのアプリ起動要求、フルパス、Start Menu shortcut、installed app metadata探索（実装済み。実環境の手動確認は未実施）。
+3. Local Intelligence Runtime Phase 1（deterministic routing、Local Skill DB、alias、success/failure、last-used、memory strength、known launch reuse）を実装済み。次はPersonal MemoryとReflection。
 5. Research Orchestrator：未知タスク分解、ローカル調査、公式Web／一般Web検索、根拠管理、re-plan loop。
 6. PowerShellExecutionProposal、Policy、確認画面、Executor、verification、auditの実装。
 7. 署名済みBrokerと実UAC／実Restart-Serviceの手動確認を、開発Fake経路と分離して実施する。
@@ -585,3 +583,4 @@ ChatGPTプロジェクト共有ストレージには仕様書本体の複製を�
 - **0.3.0 — 2026-08-08:** Defined goal-oriented autonomous problem solving, unknown-task research, official/general Web search, confirmation-free read-only chaining, re-planning after failure, Local PC full-capability principle, and earlier one-shot UAC elevation.
 - **0.4.0 — 2026-08-08:** Defined WindowsPet as the PC-resident intelligence identity and user partner / "strongest IT administrator"; added intent inference from local context, Local-first Primary Brain, Luna→Terra→Sol cognitive-extension routing, latency as a product-quality requirement, unified user-facing identity, Reflection lifecycle, collective-intelligence boundaries, and Git-first fixed-filename documentation governance.
 - **0.5.0 — 2026-08-08:** Added bounded read-only winget package-name search with fixed source, non-interactive arguments, strict output parsing, timeout, and explicit exclusion of install/upgrade/uninstall/source mutation.
+- **0.6.0 — 2026-08-08:** Recorded chat application launch handoff, read-only Start Menu and installed-app discovery, and Local Intelligence Phase 1 implementation boundaries.
