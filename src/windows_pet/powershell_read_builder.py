@@ -63,6 +63,25 @@ foreach ($root in $catalog[$catalogName]) {
 }
 '''
         timeout = 15.0
+    elif request.area is WindowsInspectionArea.WINGET:
+        rows = r'''$winget = @(Get-Command winget.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+$rawLines = @(& $winget search --name $params.query --count $params.maxResults --source winget --accept-source-agreements --disable-interactivity --nowarn 2>$null)
+if ($LASTEXITCODE -ne 0) { throw "winget_search_failed" }
+$items = @()
+$dataStarted = $false
+foreach ($line in $rawLines) {
+    if ([string]$line -match '^\s*-{3,}\s*$') { $dataStarted = $true; continue }
+    if (-not $dataStarted -or $items.Count -ge $params.maxResults) { continue }
+    $match = [regex]::Match([string]$line, '^\s*(.*?)\s+([A-Za-z0-9][A-Za-z0-9._-]*\.[A-Za-z0-9._-]+)\s+(\S+)(?:\s+(.*))?\s*$')
+    if ($match.Success) {
+        $name = $match.Groups[1].Value.Trim()
+        $id = $match.Groups[2].Value.Trim()
+        $version = $match.Groups[3].Value.Trim()
+        $items += [ordered]@{name=$name.Substring(0, [math]::Min(256, $name.Length));id=$id.Substring(0, [math]::Min(256, $id.Length));version=$version.Substring(0, [math]::Min(128, $version.Length))}
+    }
+}
+'''
+        timeout = 30.0
     else:
         rows = '''$items = @(Get-NetIPConfiguration | Sort-Object InterfaceAlias | Select-Object -First $params.maxResults | ForEach-Object { [ordered]@{interfaceAlias=$_.InterfaceAlias;status=$_.NetAdapter.Status.ToString();ipv4Addresses=@($_.IPv4Address | ForEach-Object { [ordered]@{address=$_.IPAddress;prefixLength=[int]$_.PrefixLength} });defaultGateway=(Get-NullableGateway $_.IPv4DefaultGateway)} })
 '''

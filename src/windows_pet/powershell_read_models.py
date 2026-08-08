@@ -10,6 +10,7 @@ class WindowsInspectionArea(str, Enum):
     NETWORK = "network"
     EVENT_LOGS = "event_logs"
     REGISTRY = "registry"
+    WINGET = "winget"
 
 
 @dataclass(frozen=True)

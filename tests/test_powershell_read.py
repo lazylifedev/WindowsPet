@@ -25,7 +25,8 @@ def test_tool_request_schema_and_parser_rejects_unsafe_values():
     assert parsed.area is WindowsInspectionArea.PROCESSES
     assert ToolDispatcher.parse_windows_inspection({"area":"event_logs", "query":"System", "max_results":5}).area is WindowsInspectionArea.EVENT_LOGS
     assert ToolDispatcher.parse_windows_inspection({"area":"registry", "query":"app_paths", "max_results":5}).area is WindowsInspectionArea.REGISTRY
-    for invalid in ({"area":"network","query":"x","max_results":1}, {"area":"registry","query":"arbitrary_path","max_results":1}, {"area":"other","query":None,"max_results":1}, {"area":"services","query":"x\0","max_results":1}, {"area":"services","query":"x\r\ny","max_results":1}, {"area":"services","query":"x\ty","max_results":1}, {"area":"services","query":"x\u007fy","max_results":1}, {"area":"services","query":None,"max_results":101}):
+    assert ToolDispatcher.parse_windows_inspection({"area":"winget", "query":"7zip", "max_results":5}).area is WindowsInspectionArea.WINGET
+    for invalid in ({"area":"network","query":"x","max_results":1}, {"area":"registry","query":"arbitrary_path","max_results":1}, {"area":"winget","query":None,"max_results":1}, {"area":"winget","query":"   ","max_results":1}, {"area":"other","query":None,"max_results":1}, {"area":"services","query":"x\0","max_results":1}, {"area":"services","query":"x\r\ny","max_results":1}, {"area":"services","query":"x\ty","max_results":1}, {"area":"services","query":"x\u007fy","max_results":1}, {"area":"services","query":None,"max_results":101}):
         with pytest.raises(ValueError): ToolDispatcher.parse_windows_inspection(invalid)
 
 
@@ -33,8 +34,8 @@ def test_inspection_tool_schema_is_strict_and_exposed():
     tool = next(tool for tool in AIClient.__new__(AIClient)._tools() if tool["name"] == "inspect_windows")
     assert tool["strict"] is True and tool["parameters"]["additionalProperties"] is False
     assert tool["parameters"]["required"] == ["area", "query", "max_results"]
-    assert tool["parameters"]["properties"]["area"]["enum"][-2:] == ["event_logs", "registry"]
-    assert "registry" in tool["parameters"]["properties"]["area"]["enum"]
+    assert tool["parameters"]["properties"]["area"]["enum"][-3:] == ["event_logs", "registry", "winget"]
+    assert "registry" in tool["parameters"]["properties"]["area"]["enum"] and "winget" in tool["parameters"]["properties"]["area"]["enum"]
 
 
 def test_fake_responses_send_process_stop_tool_and_preserve_single_definition():
@@ -111,6 +112,16 @@ def test_registry_inspection_is_fixed_catalog_and_strict():
     assert validate_result(value, WindowsInspectionArea.REGISTRY, 1) == value
     with pytest.raises(ResultValidationError, match="invalid_registry"):
         validate_result({**value, "items": [{**value["items"][0], "catalog": "arbitrary"}]}, WindowsInspectionArea.REGISTRY, 1)
+
+
+def test_winget_inspection_is_bounded_name_search_and_strict():
+    plan = build_read_plan(request("winget", "7zip", 5))
+    assert all(token in plan.script for token in ("search --name $params.query", "--count $params.maxResults", "--source winget", "--disable-interactivity"))
+    assert not any(token in plan.script for token in (" install ", " upgrade ", " uninstall ", "source add", "source remove"))
+    value = {"schemaVersion": 1, "operation": "winget", "items": [{"name": "7-Zip", "id": "7zip.7zip", "version": "24.09"}]}
+    assert validate_result(value, WindowsInspectionArea.WINGET, 1) == value
+    with pytest.raises(ResultValidationError, match="invalid_winget"):
+        validate_result({**value, "items": [{**value["items"][0], "id": ""}]}, WindowsInspectionArea.WINGET, 1)
 
 
 class FakeProcess:

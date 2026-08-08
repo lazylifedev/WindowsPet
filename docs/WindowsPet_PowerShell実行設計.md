@@ -1,6 +1,6 @@
 # WindowsPet PowerShell実行設計
 
-**Version:** 0.4.2\
+**Version:** 0.5.0\
 **Date:** 2026-08-08\
 **Audience:** ChatGPT / Codex / WindowsPet developers\
 **Status:** Phase 3B state-change runtime and Phase 4B service-restart elevation wiring are implemented with Fake/read-only validation. Real UAC, real Broker Restart-Service, and real administrative operations are not executed by the development test path.\
@@ -808,7 +808,7 @@ Phase 4B production wiring:
 - The Broker's normal constructor remains Fake-safe. `BrokerEntryPoint.production()` explicitly installs `ElevatedRestartServiceExecutor`, whose only operation is the canonical `restart_service` template with fixed PowerShell arguments, restricted environment, hash checks, bounded execution, cooperative cancellation, and temporary-script cleanup.
 - The Broker derives `envelope-<random>.result.json` from the validated envelope path. The CLI has no free `--result` path; result schema, canonical JSON, request binding, operation binding, script-hash binding, size bound, exclusive creation, and root boundary are enforced.
 - Main performs independent read-only verification of the canonical service name, display identity, and actual `Running` state. Broker exit code alone never produces a success message.
-- Automated Phase 4B validation covers standard-user normal/cancel/fail-closed flows, one-shot grant reuse, wrong result bindings, production executor Fake Popen boundaries, and integrated Qt stress (normal 100, cancel 50, shutdown 50). The final regression run is 286 passed, skipped 0, xfailed 0.
+- Automated Phase 4B validation covers standard-user normal/cancel/fail-closed flows, one-shot grant reuse, wrong result bindings, production executor Fake Popen boundaries, and integrated Qt stress (normal 100, cancel 50, shutdown 50). The final regression run is 287 passed, skipped 0, xfailed 0.
 
 Phase 4B acceptance status: automated Fake/read-only validation and both PyInstaller targets are complete. Real UAC prompt, real elevation, real Broker `Restart-Service`, signed-helper validation, and Phase 3B's latest-build direct real `Restart-Service` confirmation remain pending by design.
 
@@ -823,6 +823,12 @@ Low-risk registry read:
 - `inspect_windows` accepts `registry` only with the code-owned catalogs `app_paths` and `installed_apps`; omitted query selects `app_paths`.
 - The generated script enumerates only the fixed HKCU/HKLM application metadata roots and reads `DisplayName` values. Arbitrary registry paths, sensitive-key discovery, writes, and startup changes are outside this capability.
 - Results are bounded strict records containing the catalog, canonicalized path text, value name, and a value capped at 512 characters. Fake output and unsupported-catalog rejection are tested.
+
+Low-risk winget read/search:
+
+- `inspect_windows` accepts `winget` only with a non-empty package-name query; the operation is metadata search and never performs install, upgrade, uninstall, or source mutation.
+- The generated script resolves only the `winget.exe` application command and invokes fixed `search --name`, `--count`, `--source winget`, `--accept-source-agreements`, `--disable-interactivity`, and `--nowarn` arguments. The timeout is 30 seconds and stdout is still bounded by the common runner cap.
+- Locale-dependent tabular output is parsed only after the separator line and uses a package-ID-shaped column boundary. Results are strict bounded `name`, `id`, and `version` records. The development host's real read-only `7zip` search returned one validated record; no package mutation was run.
 
 ### Phase 5 — Memory and shared procedures
 
@@ -860,3 +866,4 @@ Canonical file: `docs/WindowsPet_PowerShell実行設計.md`. Keep the filename s
 - **0.4.0 — 2026-08-08:** Connected the Phase 4A contract to the service-restart UI for both admin-direct and standard-user elevation paths; added Main Grant consume, fixed production Broker executor, bounded deterministic result files, read-only verification, and Fake/read-only integrated stress. Real UAC and real administrative operations remain unexecuted.
 - **0.4.1 — 2026-08-08:** Added the low-risk `event_logs` inspection area with fixed `Get-WinEvent` generation, bounded strict result validation, AI tool schema exposure, and Fake/read-only tests. No state-changing event-log capability was added.
 - **0.4.2 — 2026-08-08:** Added the fixed-catalog `registry` inspection area for application metadata, with strict catalog validation, bounded result schema, and Fake/read-only tests. Arbitrary registry access and writes remain excluded.
+- **0.5.0 — 2026-08-08:** Added bounded read-only `winget` package-name search with fixed non-interactive source arguments, locale-tolerant result parsing, strict schema validation, and real read-only/Fake tests. Package mutation remains excluded.

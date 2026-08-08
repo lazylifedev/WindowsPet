@@ -1,7 +1,7 @@
 # WindowsPet 設計仕様書
 
 **Subtitle:** PCに住み、ユーザーと共に考え、最強の情シスとして実作業で困りごとを解決するローカルAIパートナー\
-**Version:** 0.4.3\
+**Version:** 0.5.0\
 **Date:** 2026-08-08\
 **Audience:** ChatGPT / Codex / WindowsPet developers\
 **Status:** Phase 3B confirmed service-restart implementation is retained; Phase 4A foundation and Phase 4B production wiring are implemented with automated Fake/read-only validation. Real UAC, real Broker Restart-Service, and real administrative changes remain intentionally unexecuted.
@@ -466,9 +466,10 @@ chat-serverは複数WindowsPetの**集合知（Global Brain / Shared Knowledge�
 - Phase 4Aの自動検証では実UAC、実Elevation、Restart-Service、Stop-Service、Start-Service、その他の管理者変更を実行していない。
 - Phase 4B: `ADMIN_REQUIRED` を確認前に拒否せず、標準権限では Main 側の one-shot Grant consume、`ElevationRequest`、決定論的な同梱 Broker path検証、Native UAC、Broker、独立read-only service verificationへ接続。管理者として起動された場合は既存 `ServiceRestartRunner` の直接経路とconsume契約を維持。
 - Phase 4B: production Broker は明示構築時だけ `ElevatedRestartServiceExecutor` を使用し、通常BrokerはFake-safeを維持。固定script、再hash、restricted environment、固定PowerShell argv、bounded timeout、協調cancel、temp cleanup、決定論的result pathを実装。
-- Phase 4B automated validation: standard-user Fake elevation normal/cancel/missing-Broker、Grant二重利用防止、result binding、production executor Fake Popen境界、Qt integrated stress 100/50/50を実施。最新pytestは286 passed、skipped 0、xfailed 0。
+- Phase 4B automated validation: standard-user Fake elevation normal/cancel/missing-Broker、Grant二重利用防止、result binding、production executor Fake Popen境界、Qt integrated stress 100/50/50を実施。最新pytestは287 passed、skipped 0、xfailed 0。
 - Low-risk PowerShell read: 固定生成scriptとstrict result schemaによる process／service／network に加え、`Get-WinEvent` の bounded event-log read（既定 `System`、明示 log name、message 2048文字上限）と固定 catalog registry read（`app_paths`／`installed_apps`、DisplayName限定）をFake/read-only検証済み。
 - Low-risk registry read: `app_paths`／`installed_apps` の固定 catalog だけを対象にし、任意 registry path、secret-oriented key、write は受け付けない bounded read と strict result schema をFake検証済み。
+- Low-risk winget read/search: package name metadata search only。固定 `winget search --name`、source agreement acceptance、non-interactive、source固定、件数上限、30秒timeout、strict result schemaを実機read-only／Fake検証済み。install／upgrade／uninstall／source変更は未実装。
 
 Implementation baseline: `b7e283cd9168c33531ce49f17a194db1dff08b0a` (`fix: make confirmed launch executable and tested`).\
 Validation at baseline: `102 passed`, compileall success, build success.
@@ -496,7 +497,7 @@ Validation at baseline: `102 passed`, compileall success, build success.
 5. Research Orchestrator：未知タスク分解、ローカル調査、公式Web／一般Web検索、根拠管理、re-plan loop。
 6. PowerShellExecutionProposal、Policy、確認画面、Executor、verification、auditの実装。
 7. 署名済みBrokerと実UAC／実Restart-Serviceの手動確認を、開発Fake経路と分離して実施する。
-8. 低リスクPowerShell Tool: process、service、network、event log、固定catalog registry readを実装済み。残りはwinget read/search。
+8. 低リスクPowerShell Tool: process、service、network、event log、固定catalog registry read、winget name searchを実装済み。
 9. 変更系PowerShell Tool: service、startup、registry write、scheduled task、Windows settings、network/firewall/ACL。
 10. Reflection pipeline、local persistent memory、revalidation、Memory UI、API context compression、successful-procedure distillation。
 11. Luna→Terra→Solのlatency/cost/confidence aware model routingと評価基盤。
@@ -583,3 +584,4 @@ ChatGPTプロジェクト共有ストレージには仕様書本体の複製を�
 - **0.2.0 — 2026-08-07:** Updated current implementation state through confirmed local app launch; adopted PowerShell as a standard execution backend when appropriate; added exact-script confirmation, execution-backend selection, current limitations, revised roadmap, and document-governance rules.
 - **0.3.0 — 2026-08-08:** Defined goal-oriented autonomous problem solving, unknown-task research, official/general Web search, confirmation-free read-only chaining, re-planning after failure, Local PC full-capability principle, and earlier one-shot UAC elevation.
 - **0.4.0 — 2026-08-08:** Defined WindowsPet as the PC-resident intelligence identity and user partner / "strongest IT administrator"; added intent inference from local context, Local-first Primary Brain, Luna→Terra→Sol cognitive-extension routing, latency as a product-quality requirement, unified user-facing identity, Reflection lifecycle, collective-intelligence boundaries, and Git-first fixed-filename documentation governance.
+- **0.5.0 — 2026-08-08:** Added bounded read-only winget package-name search with fixed source, non-interactive arguments, strict output parsing, timeout, and explicit exclusion of install/upgrade/uninstall/source mutation.
