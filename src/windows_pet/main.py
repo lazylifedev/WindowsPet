@@ -13,7 +13,7 @@ from .character_selection import CharacterSelection, resolve_selection, save_sel
 from .chat_bubble import InputBubble, chat_position, response_position
 from .paths import (assets_root, character_data_root, character_installed_root,
                     character_selection_path, character_working_root,
-                    local_skill_db_path, runtime_data_root)
+                    local_skill_db_path, personal_memory_db_path, runtime_data_root)
 from .character_editor_window import CharacterEditorWindow
 from .storage import constrain_to_primary, load_position, save_position
 from .file_search_settings_window import FileSearchSettingsWindow
@@ -28,6 +28,9 @@ from .chat_process_stop_controller import ChatProcessStopController
 from .chat_service_restart_controller import ChatServiceRestartController
 from .local_skill_router import LocalSkillRouter
 from .local_skill_store import LocalSkillStore
+from .memory.service import MemoryService
+from .memory.sqlite_repository import SQLiteMemoryRepository
+from .memory_window import MemoryWindow
 from .ai_worker import AIWorker
 from .character_runtime_events import CharacterRuntimeEventDispatcher
 
@@ -64,7 +67,8 @@ class PetWindow(QWidget):
         self._hover_triggered = False; self._last_hover_long_ms = -30000
         self.audit_sink = audit_sink or JsonlAuditSink(position_path.parent / "audit.jsonl")
         self.skill_store = LocalSkillStore(local_skill_db_path())
-        self.input_bubble = InputBubble(self, worker_factory=lambda history: AIWorker(history, audit=self.audit_sink), local_skill_router=LocalSkillRouter(self.skill_store))
+        self.memory_service = MemoryService(SQLiteMemoryRepository(personal_memory_db_path()))
+        self.input_bubble = InputBubble(self, worker_factory=lambda history: AIWorker(history, audit=self.audit_sink), local_skill_router=LocalSkillRouter(self.skill_store), memory_service=self.memory_service)
         self.launch_controller = ChatApplicationLaunchController(self.input_bubble.complete_local_action, self, self.audit_sink, show_status=self.input_bubble.show_local_action_status, skill_store=self.skill_store)
         self.process_stop_controller = ChatProcessStopController(self.input_bubble.complete_local_action, self, self.audit_sink)
         self.service_restart_controller = ChatServiceRestartController(self.input_bubble.complete_local_action, self, self.audit_sink)
@@ -74,6 +78,7 @@ class PetWindow(QWidget):
         self.openai_settings_window = None
         self.help_window = None
         self.local_inspection_window = None
+        self.memory_window = None
         self.tray_icon = None; self.tray_menu = None; self.character_editor_window = None
         self._exit_requested = False
         self._shutdown_complete = False
@@ -237,6 +242,7 @@ class PetWindow(QWidget):
         self.tray_menu.addAction("OpenAI API 設定", self.open_openai_settings)
         self.tray_menu.addAction("ファイル検索設定", self.open_file_search_settings)
         self.tray_menu.addAction("PC調査情報", self.show_local_inspection)
+        self.tray_menu.addAction("Personal Memory", self.show_memory)
         self.tray_menu.addAction("会話履歴", self.input_bubble.show_history)
         self.tray_menu.addAction("使い方", self.show_help)
         self.tray_menu.addSeparator(); self.tray_menu.addAction("終了", self.quit_application)
@@ -331,6 +337,7 @@ class PetWindow(QWidget):
         menu.addAction('OpenAI API 設定', self.open_openai_settings)
         menu.addAction('ファイル検索設定', self.open_file_search_settings)
         menu.addAction('PC調査情報', self.show_local_inspection)
+        menu.addAction('Personal Memory', self.show_memory)
         recent = menu.addAction('最近の検索結果', self.show_recent_search)
         recent.setEnabled(self.search_store.latest() is not None)
         cancel = menu.addAction('処理をキャンセル', self.cancel_current_processing)
@@ -368,6 +375,10 @@ class PetWindow(QWidget):
     def show_local_inspection(self):
         if self.local_inspection_window is None: self.local_inspection_window = LocalInspectionWindow(self, audit_sink=self.audit_sink)
         self.local_inspection_window.show(); self.local_inspection_window.raise_(); self.local_inspection_window.activateWindow()
+    def show_memory(self):
+        if self.memory_window is None:
+            self.memory_window = MemoryWindow(self.memory_service, self)
+        self.memory_window.refresh(); self.memory_window.show(); self.memory_window.raise_(); self.memory_window.activateWindow()
     def show_recent_search(self):
         session = self.search_store.latest()
         if session:
@@ -411,6 +422,7 @@ class PetWindow(QWidget):
         if self.openai_settings_window is not None: self.openai_settings_window.shutdown()
         if self.help_window is not None: self.help_window.close()
         if self.local_inspection_window is not None: self.local_inspection_window.shutdown()
+        if self.memory_window is not None: self.memory_window.close()
         if self.tray_icon is not None: self.tray_icon.hide()
         save_position(self.position_path, self.pos()); super().closeEvent(event)
 

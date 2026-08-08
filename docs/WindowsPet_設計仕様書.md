@@ -1,10 +1,10 @@
 # WindowsPet 設計仕様書
 
 **Subtitle:** PCに住み、ユーザーと共に考え、最強の情シスとして実作業で困りごとを解決するローカルAIパートナー\
-**Version:** 0.5.0\
+**Version:** 0.7.0\
 **Date:** 2026-08-08\
 **Audience:** ChatGPT / Codex / WindowsPet developers\
-**Status:** Phase 3B, Phase 4A, Phase 4B, chat application launch, safe application discovery, and Local Intelligence Phase 1 are implemented with automated Fake/read-only validation. Real UAC, real Broker Restart-Service, and real administrative changes remain intentionally unexecuted.
+**Status:** Phase 2 Personal Memory, deterministic Reflection/Revalidation foundation, Phase 3B, Phase 4A, Phase 4B, chat application launch, safe application discovery, and Local Intelligence Phase 1 are implemented with automated Fake/read-only validation. Real UAC, real Broker Restart-Service, and real administrative changes remain intentionally unexecuted.
 
 > **AIへの最重要指示:** WindowsPetを単なるデスクトップペット、ChatGPTクライアント、チャットUI、読み取り専用検索アプリとして扱わないこと。WindowsPetはローカルPCで「生きる」一貫した知性主体であり、ユーザーとは主従ではなくパートナーとして接する。普段は控えめでユーザーの意思と集中を尊重し、頼まれたときは最強の情シスとして、曖昧な困りごとの本質をPCの事実・会話・記憶から推定し、知らないことも自ら調査・推論・計画し、必要ならWebや外部AIを拡張頭脳として利用する。確認不要な調査は主体的に進め、確認が必要な副作用だけを適切な時点で提示し、承認された範囲を実行・検証する。作業後は内部的にReflectionを行い、経験を次回へ活かせる知識へ変換する。ユーザーから見える知性の主体は常にWindowsPetであり、外部AIモデルを別人格・上司・別の相談相手として見せない。
 
@@ -466,13 +466,18 @@ chat-serverは複数WindowsPetの**集合知（Global Brain / Shared Knowledge�
 - Phase 4Aの自動検証では実UAC、実Elevation、Restart-Service、Stop-Service、Start-Service、その他の管理者変更を実行していない。
 - Phase 4B: `ADMIN_REQUIRED` を確認前に拒否せず、標準権限では Main 側の one-shot Grant consume、`ElevationRequest`、決定論的な同梱 Broker path検証、Native UAC、Broker、独立read-only service verificationへ接続。管理者として起動された場合は既存 `ServiceRestartRunner` の直接経路とconsume契約を維持。
 - Phase 4B: production Broker は明示構築時だけ `ElevatedRestartServiceExecutor` を使用し、通常BrokerはFake-safeを維持。固定script、再hash、restricted environment、固定PowerShell argv、bounded timeout、協調cancel、temp cleanup、決定論的result pathを実装。
-- Phase 4B automated validation: standard-user Fake elevation normal/cancel/missing-Broker、Grant二重利用防止、result binding、production executor Fake Popen境界、Qt integrated stress 100/50/50を実施。最新pytestは287 passed、skipped 0、xfailed 0。
+- Phase 4B automated validation: standard-user Fake elevation normal/cancel/missing-Broker、Grant二重利用防止、result binding、production executor Fake Popen境界、Qt integrated stress 100/50/50を実施。Phase 2追加後のpytestは307 passed、skipped 0、xfailed 0。
 - Low-risk PowerShell read: 固定生成scriptとstrict result schemaによる process／service／network に加え、`Get-WinEvent` の bounded event-log read（既定 `System`、明示 log name、message 2048文字上限）と固定 catalog registry read（`app_paths`／`installed_apps`、DisplayName限定）をFake/read-only検証済み。
 - Low-risk registry read: `app_paths`／`installed_apps` の固定 catalog だけを対象にし、DisplayName／DisplayIcon／InstallLocation以外の任意 registry path、secret-oriented key、write は受け付けない bounded read と strict result schema をFake検証済み。
 - Low-risk winget read/search: package name metadata search only。固定 `winget search --name`、source agreement acceptance、non-interactive、source固定、件数上限、30秒timeout、strict result schemaを実機read-only／Fake検証済み。install／upgrade／uninstall／source変更は未実装。
 - Chat application launch: `request_application_launch` is locally validated and handed to the existing resolver、confirmation、one-shot Grant、`ApplicationLaunchExecutor`、read-only verification flow. The AI Tool never receives execution authority.
 - Application discovery: local absolute paths、trusted Windows catalogue、PATH/App Paths、read-only Start Menu `.lnk` target resolution、installed-app `DisplayIcon`/`InstallLocation` metadata are candidate sources. Shortcut arguments、URL/UNC/device targets、untrusted registry command strings are rejected.
 - Local Intelligence Phase 1: deterministic built-in launch aliases and local SQLite learned aliases with success/failure counts、last-used timestamp、memory strength are implemented. Learned aliases still pass resolver、Policy、Confirmation、Grant、Executor、and Verification.
+- Personal Memory Phase 2: `src/windows_pet/memory/` に Local-only の repository/service/model 層を追加。SHORT_TERM／LONG_TERM／PROTECTED、preference 等のcategory、明示remember／forget、TTL、bounded lookup、reinforcement、cleanup candidate、破損DB safe fallbackを実装済み。
+- Personal Memoryの保存前に決定論的privacy filterを通し、secret、credential、raw conversation、screenshot、raw stdout/stderr、巨大内容を保存しない。cloud、HTTP、OpenAI upload、Global Brain送信は行わない。
+- Personal Memory inspection UIをcontext menu／tray menuへ追加。category filter、protected表示、個別削除を提供し、Local Skill DBとは別domain／別tableで管理する。
+- Reflection foundation: 構造化Experience、deterministic Reflection、provenance付きLearningCandidate、verified成功時だけのLocal Skill promotion、failure evidence保持、abstract targetのcurrent resolver再検証を実装済み。ReflectionはQt threadやnetworkを使用しない。
+- Qt lifecycle hardening: 親付きQThreadの`finished`通知と参照解放の順序を維持し、親QObjectによる破棄責任へ統一。修正後に別プロセスstress harnessを追加し、normal 100／cancel 50／shutdown 50を3プロセス連続で検証済み。`QThread.terminate`は使用していない。
 
 Implementation baseline: current Git `main` through the Local Intelligence Phase 1 delivery.\
 Validation baseline: Fake/read-only discovery and local-learning tests pass; full acceptance is recorded in the delivery report for the current commit.
@@ -484,7 +489,7 @@ Validation baseline: Fake/read-only discovery and local-learning tests pass; ful
 - 実UAC、署名済みBroker、実管理者変更の手動確認は未実施。
 - UI／QThreadの製品フローを網羅する統合テストは不足している。
 - literal `DisplayIcon` と安全な `InstallLocation` から決定論的に候補化できない installed app は名前検索で見つからない場合がある。`UninstallString`/`QuietUninstallString` は意図的に利用しない。
-- Personal Memory、chat-server sharing、Reflection、cloud/global skill sharingは未実装。Local Skill DBは実行学習専用で会話全文を保存しない。
+- Global Brain、chat-server sharing、Personal Memory cloud sync、cloud/global skill sharingは未実装。Local Skill DBは実行学習専用で会話全文を保存しない。Reflectionはdeterministic foundationまでで、LLM reflection／Research Orchestratorは未実装。
 - File server、Teams connector、UI automation、自由形式のPowerShell Tool群は未実装。
 
 ## 16. Roadmap
@@ -584,3 +589,4 @@ ChatGPTプロジェクト共有ストレージには仕様書本体の複製を�
 - **0.4.0 — 2026-08-08:** Defined WindowsPet as the PC-resident intelligence identity and user partner / "strongest IT administrator"; added intent inference from local context, Local-first Primary Brain, Luna→Terra→Sol cognitive-extension routing, latency as a product-quality requirement, unified user-facing identity, Reflection lifecycle, collective-intelligence boundaries, and Git-first fixed-filename documentation governance.
 - **0.5.0 — 2026-08-08:** Added bounded read-only winget package-name search with fixed source, non-interactive arguments, strict output parsing, timeout, and explicit exclusion of install/upgrade/uninstall/source mutation.
 - **0.6.0 — 2026-08-08:** Recorded chat application launch handoff, read-only Start Menu and installed-app discovery, and Local Intelligence Phase 1 implementation boundaries.
+- **0.7.0 — 2026-08-08:** Added the local Personal Memory Phase 2 foundation, inspection/deletion UI, deterministic privacy/retention boundaries, Reflection metadata, verified Skill promotion, and abstract-target revalidation boundaries.

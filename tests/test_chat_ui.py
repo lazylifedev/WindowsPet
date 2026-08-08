@@ -219,8 +219,8 @@ def test_context_menu_and_history_use_japanese_labels(qapp, tmp_path):
     menu = pet._build_context_menu()
     labels = [action.text() for action in menu.actions() if not action.isSeparator()]
     assert labels == [
-        "キャラクター管理",
-        "キャラクター設定", "OpenAI API 設定", "ファイル検索設定", "PC調査情報", "最近の検索結果", "処理をキャンセル",
+            "キャラクター管理",
+            "キャラクター設定", "OpenAI API 設定", "ファイル検索設定", "PC調査情報", "Personal Memory", "最近の検索結果", "処理をキャンセル",
         "チャットを開く", "チャットを閉じる", "会話履歴", "使い方", "位置をリセット", "終了",
     ]
     history = HistoryWindow(pet.input_bubble.conversation)

@@ -1,6 +1,6 @@
 # WindowsPet AI Memory / Learning / Personality / Shared Knowledge Specification
 
-Version: 0.4\
+Version: 0.5\
 Date: 2026-08-08\
 Status: Design baseline / implementation reference
 Related: `WindowsPet_設計仕様書.md`
@@ -823,6 +823,8 @@ Current implementation: WindowsPet has a deterministic built-in application-laun
 - basic memory decay,
 - memory inspection UI.
 
+Current implementation: Personal Memory is a separate local-only domain under `src/windows_pet/memory/`, with a repository interface and SQLite adapter. It supports short-term TTL, long-term and protected records, explicit structured remember/forget, bounded lookup, deterministic privacy rejection, reinforcement, cleanup candidates, corrupt-database safe fallback, and a small inspection/deletion UI. No HTTP, cloud, OpenAI upload, or Global Brain call is made. Reflection foundation is also local and deterministic: structured Experience -> Reflection -> provenance-bearing verified LearningCandidate -> abstract Local Skill promotion -> current resolver revalidation. Unverified execution, cancellation, policy rejection, secrets, raw logs, raw conversation, and machine-specific paths are never promoted. Global Brain and cloud sharing remain unimplemented.
+
 ### Phase 3 - Global Brain MVP on Google Cloud
 
 - FastAPI on Cloud Run,
@@ -938,3 +940,4 @@ The canonical copy is `docs/WindowsPet_AI_Memory_Learning_Spec.md` in the `lazyl
 
 - **0.3 — 2026-08-08:** Added WindowsPet intelligence identity, Local-first Primary Brain, Luna/Terra/Sol cognitive-extension routing, local-PC-assisted intent inference, explicit Reflection pipeline, collective-intelligence privacy boundary, and Git-first documentation governance.
 - **0.4 — 2026-08-08:** Recorded the Phase 1 local deterministic launch routing and SQLite Skill store implementation boundary.
+- **0.5 — 2026-08-08:** Recorded the local Personal Memory Phase 2 and deterministic Reflection/Revalidation foundation boundaries.

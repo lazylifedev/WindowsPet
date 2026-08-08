@@ -34,6 +34,14 @@ def local_skill_db_path() -> Path:
         return Path(location) / "skills.sqlite3"
     return Path.home() / "WindowsPet" / "skills.sqlite3"
 
+
+def personal_memory_db_path() -> Path:
+    """Return the local-only Personal Memory database path."""
+    location = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+    if location:
+        return Path(location) / "personal_memory.sqlite3"
+    return Path.home() / "WindowsPet" / "personal_memory.sqlite3"
+
 def assets_root() -> Path:
     return resource_path("assets/animations")
 

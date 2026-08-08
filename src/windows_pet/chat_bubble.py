@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QDialog, QFrame, QGraphicsDropShadowEffect, QHBox
 from .ai_worker import AIWorker
 from .conversation import Conversation
 from .openai_credentials import is_api_key_configured
+from .memory.commands import MemoryCommand, parse_memory_command
 
 MIN_INPUT_HEIGHT, MAX_INPUT_HEIGHT = 52, 140
 TAIL_WIDTH, TAIL_HEIGHT = 14, 18
@@ -365,8 +366,8 @@ class InputBubble(BubbleFrame):
     focus_state_changed = Signal(bool)
     draft_state_changed = Signal(bool)
     closed=Signal(); send_started=Signal(); send_finished=Signal(); search_started=Signal(); search_completed=Signal(dict); api_settings_requested=Signal(); application_launch_requested=Signal(object); application_launch_ready=Signal(object); process_stop_ready=Signal(object); service_restart_ready=Signal(object); cancel_processing_requested=Signal()
-    def __init__(self, pet, worker_factory=AIWorker, local_skill_router=None):
-        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self.local_skill_router=local_skill_router; self._pending=False; self._local_action_pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False; self._active_user_text=None; self._retry_text=None; self._last_error_kind=None; self._pending_application_launch_request=None; self._pending_process_stop_request=None; self._pending_service_restart_request=None
+    def __init__(self, pet, worker_factory=AIWorker, local_skill_router=None, memory_service=None):
+        super().__init__(); self.pet=pet; self._worker_factory=worker_factory; self.local_skill_router=local_skill_router; self.memory_service=memory_service; self._pending=False; self._local_action_pending=False; self._search_in_progress=False; self._search_status_active=False; self.conversation=Conversation(); self._thread=None; self._worker=None; self.response_pinned=False; self._active_user_text=None; self._retry_text=None; self._last_error_kind=None; self._pending_application_launch_request=None; self._pending_process_stop_request=None; self._pending_service_restart_request=None
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.card=QFrame(self); self.card.setStyleSheet('QFrame{background:#20242b;border:0;}')
         # A layered top-level window must never receive an effect whose expanded
@@ -468,6 +469,10 @@ class InputBubble(BubbleFrame):
         if not self._can_start_request():return False
         text=self.input.toPlainText().strip()
         if not text:return False
+        if self.memory_service is not None:
+            command = parse_memory_command(text)
+            if command is not None:
+                return self._run_memory_command(text, command)
         if self.local_skill_router is not None:
             match = self.local_skill_router.route(text)
             if match is not None:
@@ -481,6 +486,18 @@ class InputBubble(BubbleFrame):
         started = self._start_request(text, clear_input=True)
         if started: self._retry_text=None; self._last_error_kind=None
         return started
+
+    def _run_memory_command(self, text: str, command: MemoryCommand) -> bool:
+        self._active_user_text = text
+        self.input.clear(); self.conversation.add_user(text)
+        if command.action == "remember":
+            record = self.memory_service.request_memory_store(category=command.category or "fact", key=command.key or "", value=command.value or "", protected=command.protected)
+            response = "その記憶を保存しました。" if record is not None else "その種類の秘密情報や大きすぎる内容は記憶に保存しません。"
+        else:
+            status, _ = self.memory_service.forget_by_key(command.key or "")
+            response = {"deleted": "該当する記憶を削除しました。", "not_found": "該当する記憶は見つかりませんでした。", "ambiguous": "複数の候補があるため、Personal Memory画面で対象を選んでください。"}.get(status, "記憶を削除できませんでした。")
+        self.response.setText(response); self.response_bubble.set_plain_text(response); self.response_bubble.set_copy_enabled(True); self.response_bubble.set_actions_enabled(True); self._position_response(); self.response_bubble.show(); self.conversation.add_assistant(response); self._complete()
+        return True
     def _start_local_action(self, text, request):
         if not text or not self._can_start_request(): return False
         self._cancel_requested=False; self._active_user_text=text; self._pending_application_launch_request=request
