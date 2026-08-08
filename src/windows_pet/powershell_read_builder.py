@@ -38,6 +38,11 @@ def build_read_plan(request: WindowsInspectionRequest) -> PowerShellReadPlan:
         rows = '''$items = @(Get-Service | Where-Object { $null -eq $params.query -or $_.Name.IndexOf([string]$params.query, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or $_.DisplayName.IndexOf([string]$params.query, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 } | Sort-Object Name | Select-Object -First $params.maxResults | ForEach-Object { [ordered]@{name=$_.Name;displayName=$_.DisplayName;state=$_.Status.ToString();startMode=$_.StartType.ToString()} })
 '''
         timeout = 15.0
+    elif request.area is WindowsInspectionArea.EVENT_LOGS:
+        rows = '''$logName = if ($null -eq $params.query -or [string]::IsNullOrWhiteSpace([string]$params.query)) { "System" } else { [string]$params.query }
+$items = @(Get-WinEvent -LogName $logName -MaxEvents $params.maxResults | ForEach-Object { [ordered]@{logName=$logName;eventId=[int]$_.Id;level=([string]$_.LevelDisplayName);provider=([string]$_.ProviderName);timeCreated=($(if ($null -eq $_.TimeCreated) { "" } else { $_.TimeCreated.ToUniversalTime().ToString("o") }));message=(([string]$_.Message).Substring(0, [math]::Min(2048, ([string]$_.Message).Length)))} })
+'''
+        timeout = 15.0
     else:
         rows = '''$items = @(Get-NetIPConfiguration | Sort-Object InterfaceAlias | Select-Object -First $params.maxResults | ForEach-Object { [ordered]@{interfaceAlias=$_.InterfaceAlias;status=$_.NetAdapter.Status.ToString();ipv4Addresses=@($_.IPv4Address | ForEach-Object { [ordered]@{address=$_.IPAddress;prefixLength=[int]$_.PrefixLength} });defaultGateway=(Get-NullableGateway $_.IPv4DefaultGateway)} })
 '''

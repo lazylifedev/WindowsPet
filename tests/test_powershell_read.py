@@ -23,6 +23,7 @@ def request(area="processes", query=None, maximum=10):
 def test_tool_request_schema_and_parser_rejects_unsafe_values():
     parsed = ToolDispatcher.parse_windows_inspection({"area":"processes", "query":"note", "max_results":5})
     assert parsed.area is WindowsInspectionArea.PROCESSES
+    assert ToolDispatcher.parse_windows_inspection({"area":"event_logs", "query":"System", "max_results":5}).area is WindowsInspectionArea.EVENT_LOGS
     for invalid in ({"area":"network","query":"x","max_results":1}, {"area":"other","query":None,"max_results":1}, {"area":"services","query":"x\0","max_results":1}, {"area":"services","query":"x\r\ny","max_results":1}, {"area":"services","query":"x\ty","max_results":1}, {"area":"services","query":"x\u007fy","max_results":1}, {"area":"services","query":None,"max_results":101}):
         with pytest.raises(ValueError): ToolDispatcher.parse_windows_inspection(invalid)
 
@@ -31,6 +32,7 @@ def test_inspection_tool_schema_is_strict_and_exposed():
     tool = next(tool for tool in AIClient.__new__(AIClient)._tools() if tool["name"] == "inspect_windows")
     assert tool["strict"] is True and tool["parameters"]["additionalProperties"] is False
     assert tool["parameters"]["required"] == ["area", "query", "max_results"]
+    assert tool["parameters"]["properties"]["area"]["enum"][-1] == "event_logs"
 
 
 def test_fake_responses_send_process_stop_tool_and_preserve_single_definition():
@@ -61,6 +63,39 @@ def test_service_inspection_uses_get_service_and_canonical_service_fields():
     assert "Get-CimInstance" not in plan.script
     assert "state=$_.Status.ToString()" in plan.script
     assert "startMode=$_.StartType.ToString()" in plan.script
+
+
+def test_event_log_inspection_uses_fixed_read_only_win_event_script():
+    plan = build_read_plan(request("event_logs", "System", 10))
+    assert "Get-WinEvent" in plan.script and "-LogName $logName" in plan.script
+    assert not any(token in plan.script for token in ("Set-", "Start-", "Stop-", "Restart-", "Remove-"))
+
+
+def test_event_log_result_schema_is_strict_and_bounded():
+    value = {"schemaVersion": 1, "operation": "event_logs", "items": [{
+        "logName": "System", "eventId": 7036, "level": "Information",
+        "provider": "Service Control Manager", "timeCreated": "2026-08-08T00:00:00Z",
+        "message": "The service entered the running state.",
+    }]}
+    assert validate_result(value, WindowsInspectionArea.EVENT_LOGS, 1) == value
+    invalid = dict(value, items=[dict(value["items"][0], message="x" * 2049)])
+    with pytest.raises(ResultValidationError, match="invalid_event_log"):
+        validate_result(invalid, WindowsInspectionArea.EVENT_LOGS, 1)
+
+
+def test_event_log_runner_accepts_fake_read_only_result(tmp_path):
+    root, _ = powershell_root(tmp_path)
+    output = json.dumps({"schemaVersion": 1, "operation": "event_logs", "items": [{
+        "logName": "Application", "eventId": 1000, "level": "Error",
+        "provider": "Application Error", "timeCreated": "2026-08-08T00:00:00Z",
+        "message": "bounded message",
+    }]}).encode()
+    outcome = PowerShellReadRunner(
+        windows_directory_resolver=lambda: root,
+        process_factory=lambda *args, **kwargs: FakeProcess(output),
+    ).execute(request("event_logs", "Application", 5))
+    assert outcome.status is PowerShellReadStatus.SUCCESS
+    assert outcome.result["items"][0]["eventId"] == 1000
 
 
 class FakeProcess:

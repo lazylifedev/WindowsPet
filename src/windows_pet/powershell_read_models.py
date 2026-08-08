@@ -8,6 +8,7 @@ class WindowsInspectionArea(str, Enum):
     PROCESSES = "processes"
     SERVICES = "services"
     NETWORK = "network"
+    EVENT_LOGS = "event_logs"
 
 
 @dataclass(frozen=True)

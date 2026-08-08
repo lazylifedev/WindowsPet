@@ -27,6 +27,15 @@ def validate_result(value: object, request_area: WindowsInspectionArea, max_resu
             if type(item["workingSetMb"]) not in (int, float) or not math.isfinite(item["workingSetMb"]) or item["workingSetMb"] < 0: raise ResultValidationError("invalid_process_working_set")
         elif request_area is WindowsInspectionArea.SERVICES:
             if set(item) != {"name", "displayName", "state", "startMode"} or not all(isinstance(item[k], str) and item[k] for k in item): raise ValueError("invalid_service")
+        elif request_area is WindowsInspectionArea.EVENT_LOGS:
+            keys = {"logName", "eventId", "level", "provider", "timeCreated", "message"}
+            text_keys = ("logName", "level", "provider", "timeCreated", "message")
+            if (set(item) != keys or not all(isinstance(item[key], str) for key in text_keys)
+                    or not item["logName"] or len(item["logName"]) > 256
+                    or type(item["eventId"]) is not int or item["eventId"] < 0
+                    or len(item["level"]) > 128 or len(item["provider"]) > 256
+                    or len(item["timeCreated"]) > 64 or len(item["message"]) > 2048):
+                raise ResultValidationError("invalid_event_log")
         else:
             if set(item) != {"interfaceAlias", "status", "ipv4Addresses", "defaultGateway"} or not isinstance(item["interfaceAlias"], str) or not item["interfaceAlias"] or not isinstance(item["status"], str) or not isinstance(item["ipv4Addresses"], list) or (item["defaultGateway"] is not None and not isinstance(item["defaultGateway"], str)): raise ValueError("invalid_network")
             for address in item["ipv4Addresses"]:

@@ -1,6 +1,6 @@
 # WindowsPet PowerShell実行設計
 
-**Version:** 0.4.0\
+**Version:** 0.4.1\
 **Date:** 2026-08-08\
 **Audience:** ChatGPT / Codex / WindowsPet developers\
 **Status:** Phase 3B state-change runtime and Phase 4B service-restart elevation wiring are implemented with Fake/read-only validation. Real UAC, real Broker Restart-Service, and real administrative operations are not executed by the development test path.\
@@ -812,6 +812,12 @@ Phase 4B production wiring:
 
 Phase 4B acceptance status: automated Fake/read-only validation and both PyInstaller targets are complete. Real UAC prompt, real elevation, real Broker `Restart-Service`, signed-helper validation, and Phase 3B's latest-build direct real `Restart-Service` confirmation remain pending by design.
 
+Low-risk event-log read:
+
+- `inspect_windows` now accepts `event_logs` with an optional explicit log name; omitted log name deterministically selects `System`.
+- The generated script uses only `Get-WinEvent -LogName ... -MaxEvents ...`, with no mutating cmdlet, arbitrary script input, or shell boundary change.
+- Results are strict `schemaVersion=1` records containing bounded log name, event ID, level, provider, timestamp, and a message capped at 2048 characters. Fake process output and invalid-shape rejection are covered by tests.
+
 ### Phase 5 — Memory and shared procedures
 
 - local procedure memory
@@ -846,3 +852,4 @@ Canonical file: `docs/WindowsPet_PowerShell実行設計.md`. Keep the filename s
 - **0.2.1 — 2026-08-08:** Adopted stable Git-canonical filenames and aligned references with the Local-first WindowsPet architecture without changing PowerShell safety boundaries.
 - **0.3.0 — 2026-08-08:** Implemented the Phase 4A one-shot Elevation Broker foundation: canonical Envelope, secured payload file, exact catalog/hash validation, cross-process file-backed grant/nonce claims, Fake/native launcher boundary, structured result binding, independent verification hook, Qt lifecycle, and dedicated Broker build target. Real UAC and real administrative operations remain unexecuted.
 - **0.4.0 — 2026-08-08:** Connected the Phase 4A contract to the service-restart UI for both admin-direct and standard-user elevation paths; added Main Grant consume, fixed production Broker executor, bounded deterministic result files, read-only verification, and Fake/read-only integrated stress. Real UAC and real administrative operations remain unexecuted.
+- **0.4.1 — 2026-08-08:** Added the low-risk `event_logs` inspection area with fixed `Get-WinEvent` generation, bounded strict result validation, AI tool schema exposure, and Fake/read-only tests. No state-changing event-log capability was added.
