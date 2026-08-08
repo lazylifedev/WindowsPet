@@ -16,6 +16,7 @@ from .process_stop_request import parse_process_stop_request
 from .service_restart_request import parse_service_restart_request
 from .powershell_read_runner import PowerShellReadRunner
 from .process_inspection import normalize_process_query, resolve_process_candidate
+from .research.orchestrator import ResearchOrchestrator
 
 APPLICATION_LAUNCH_HANDOFF = object()
 
@@ -26,6 +27,8 @@ Use inspect_windows for read-only process, service, network, event-log, fixed-ca
 request_process_stop only hands the request to WindowsPet's local safety flow. The Tool call itself never stops a process. WindowsPet locally re-resolves the process, validates identity, rejects protected processes, shows SCRIPT_REVIEW confirmation, issues a one-shot ExecutionGrant only after approval, runs only the approved fixed PowerShell operation, and performs read-only verification afterward. Do not claim that the process was stopped before that flow completes.
 
 For a Windows service restart request, first use inspect_windows(services). Call request_service_restart only with a service name or display name returned by that inspection. This hands off only to the local confirmation flow; it never restarts a service itself. WindowsPet binds the inspection snapshot, re-resolves the canonical service identity, rejects protected services and missing administrator rights, requires SCRIPT_REVIEW approval, then performs the fixed operation and verifies the service is Running.
+
+If none of the approved tools directly matches an otherwise safe user goal, call research_unknown with a concise summary of the original goal. Do not claim that WindowsPet cannot help merely because a dedicated tool is absent. research_unknown only starts bounded local research and may return a confirmation-waiting plan; it never executes provider-generated commands.
 
 Do not generate or execute PowerShell, shell commands, generic computer-control actions, or arbitrary scripts. Do not tell the user that WindowsPet is inherently unable to stop processes or immediately fall back to Task Manager/manual instructions when request_process_stop is available. Use a safety/policy explanation only when the tool is unavailable, the target is ambiguous, or local validation/policy rejects it.
 
@@ -65,12 +68,13 @@ class AIClient:
     def _raise_if_cancelled(cancel):
         if cancel is not None and cancel.is_set():
             raise AIClientError('cancelled', '処理をキャンセルしました。')
-    def __init__(self, client=None, timeout: float = 60.0, api_key: str | None = None, inspection_runner=None):
+    def __init__(self, client=None, timeout: float = 60.0, api_key: str | None = None, inspection_runner=None, research_orchestrator=None):
         key = api_key or get_api_key()
         if not key:
             raise AIClientError("missing_key", "OpenAI APIキーが設定されていません。")
         self.client = client or OpenAI(api_key=key, timeout=timeout, max_retries=0)
         self.inspection_runner = inspection_runner or PowerShellReadRunner()
+        self.research_orchestrator = research_orchestrator or ResearchOrchestrator()
 
     def stream(self, history: list[dict[str, str]], on_delta: Callable[[str], None], cancel=None) -> str:
         try:
@@ -121,6 +125,24 @@ class AIClient:
                     except ValueError as exc: raise AIClientError('tool', 'invalid_launch_request') from exc
                     if on_application_launch_requested: on_application_launch_requested(request)
                     return APPLICATION_LAUNCH_HANDOFF
+                if name == "research_unknown":
+                    if not call_id or call_id in seen or len(calls_found) != 1:
+                        raise AIClientError("tool", "unsupported_tool")
+                    try:
+                        outcome = dispatcher.research_unknown(getattr(call, "arguments", ""), self.research_orchestrator)
+                    except (TypeError, ValueError) as exc:
+                        raise AIClientError("tool", "invalid_research_request") from exc
+                    seen.add(call_id); calls += 1
+                    safe = {
+                        "status": outcome.session.state.value,
+                        "result_code": outcome.result_code,
+                        "route": outcome.route,
+                        "evidence_count": len(outcome.evidence),
+                        "plan_available": outcome.plan is not None,
+                        "confirmation_required": bool(outcome.plan and outcome.plan.requires_confirmation),
+                    }
+                    inputs.extend(getattr(response, "output", [])); inputs.append({"type":"function_call_output","call_id":call_id,"output":json.dumps(safe, ensure_ascii=False)})
+                    continue
                 if name == "request_process_stop":
                     if not call_id or call_id in seen or len(calls_found) != 1: raise AIClientError("tool", "unsupported_tool")
                     try: request = parse_process_stop_request(getattr(call, "arguments", ""))
@@ -200,7 +222,10 @@ class AIClient:
         return {"type":"function","name":"request_process_stop","description":"inspect_windows(processes) で確認済みの 1 件のプロセスについて、終了確認を依頼します。このTool callだけでは終了しません。","parameters":{"type":"object","properties":{"process_id":{"type":"integer","minimum":1},"expected_process_name":{"type":"string","minLength":1,"maxLength":260}},"required":["process_id","expected_process_name"],"additionalProperties":False},"strict":True}
 
     def _tools(self):
-        return self._base_tools() + [self._stop_process_tool(), self._service_restart_tool()]
+        return self._base_tools() + [self._stop_process_tool(), self._service_restart_tool(), self._research_tool()]
+
+    def _research_tool(self):
+        return {"type":"function","name":"research_unknown","description":"専用Toolがない安全な目的を、boundedなread-only Research Orchestratorへ渡します。副作用は実行せず、必要なら確認待ち計画を返します。","parameters":{"type":"object","properties":{"request":{"type":"string","minLength":1,"maxLength":240}},"required":["request"],"additionalProperties":False},"strict":True}
 
     def _service_restart_tool(self):
         return {"type":"function","name":"request_service_restart","description":"inspect_windows(services)で確認済みのWindowsサービス再起動について確認を依頼します。このTool callだけでは再起動しません。","parameters":{"type":"object","properties":{"service_query":{"type":"string","minLength":1,"maxLength":260}},"required":["service_query"],"additionalProperties":False},"strict":True}

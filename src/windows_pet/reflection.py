@@ -4,7 +4,7 @@ import re
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Protocol
 
 from .local_skill_store import LocalSkillStore
 
@@ -78,6 +78,58 @@ class RevalidationResult:
     current_identity: str | None = None
 
 
+@dataclass(frozen=True)
+class ReflectionContext:
+    """Bounded structured context; raw conversation, paths, and secrets are excluded."""
+
+    task_id: str
+    outcome: str
+    verification_result: str
+    failure_reason: str = ""
+    routing_tier: str = "local"
+    provenance_ids: tuple[str, ...] = ()
+
+    def is_safe(self) -> bool:
+        return all((_safe(self.task_id), _safe(self.outcome), _safe(self.verification_result),
+                    not self.failure_reason or _safe(self.failure_reason),
+                    _safe(self.routing_tier), all(_safe(item, 120) for item in self.provenance_ids)))
+
+
+@dataclass(frozen=True)
+class ReflectionEnrichment:
+    summary: str
+    reusable_signal: bool = False
+
+    def __post_init__(self):
+        if not _safe(self.summary, 240):
+            raise ValueError("unsafe_reflection_enrichment")
+
+
+class LLMReflectionProvider(Protocol):
+    def reflect(self, context: ReflectionContext) -> ReflectionEnrichment: ...
+
+
+class FakeLLMReflectionProvider:
+    def __init__(self, enrichment: ReflectionEnrichment | None = None):
+        self.enrichment = enrichment or ReflectionEnrichment("no additional local insight")
+        self.calls = 0
+
+    def reflect(self, context: ReflectionContext) -> ReflectionEnrichment:
+        if not context.is_safe():
+            raise ValueError("unsafe_reflection_context")
+        self.calls += 1
+        return self.enrichment
+
+
+class OptionalLLMReflection:
+    def __init__(self, provider: LLMReflectionProvider):
+        self.provider = provider
+
+    def enrich(self, experience: Experience) -> ReflectionEnrichment | None:
+        context = ReflectionContext(experience.task_id, experience.outcome, experience.verification_result, experience.failure_reason, experience.routing_tier, experience.provenance_ids)
+        return self.provider.reflect(context) if context.is_safe() else None
+
+
 class ReflectionPipeline:
     """Deterministic reflection; no LLM, Qt, network, raw logs, or secrets."""
 
@@ -110,6 +162,10 @@ class ReflectionPipeline:
                 or not _safe(candidate.provenance)):
             return False
         return self.skill_store.record_success(intent=candidate.intent, target_type=candidate.target_type, target=candidate.abstract_target, alias=candidate.alias)
+
+
+class DeterministicReflection(ReflectionPipeline):
+    """Named deterministic boundary retained alongside the future LLM provider."""
 
 
 def revalidate_abstract_target(target_type: str, abstract_target: str, resolver: Callable[[str, str], str | None]) -> RevalidationResult:

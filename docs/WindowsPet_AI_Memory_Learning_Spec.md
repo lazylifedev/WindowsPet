@@ -1,6 +1,6 @@
 # WindowsPet AI Memory / Learning / Personality / Shared Knowledge Specification
 
-Version: 0.5\
+Version: 0.6\
 Date: 2026-08-08\
 Status: Design baseline / implementation reference
 Related: `WindowsPet_設計仕様書.md`
@@ -825,6 +825,12 @@ Current implementation: WindowsPet has a deterministic built-in application-laun
 
 Current implementation: Personal Memory is a separate local-only domain under `src/windows_pet/memory/`, with a repository interface and SQLite adapter. It supports short-term TTL, long-term and protected records, explicit structured remember/forget, bounded lookup, deterministic privacy rejection, reinforcement, cleanup candidates, corrupt-database safe fallback, and a small inspection/deletion UI. No HTTP, cloud, OpenAI upload, or Global Brain call is made. Reflection foundation is also local and deterministic: structured Experience -> Reflection -> provenance-bearing verified LearningCandidate -> abstract Local Skill promotion -> current resolver revalidation. Unverified execution, cancellation, policy rejection, secrets, raw logs, raw conversation, and machine-specific paths are never promoted. Global Brain and cloud sharing remain unimplemented.
 
+### Research Orchestrator and model boundaries
+
+Current implementation: `src/windows_pet/research/` provides immutable `ResearchGoal`, bounded `ResearchSession` state transitions, a code-owned Capability Registry, provenance-bearing Evidence with fixed trust ordering, bounded local read-only investigation, structured CandidatePlan validation, confirmation waiting, cancellation, safe failure evidence, bounded re-planning, and deterministic Reflection handoff. Known Local Skills resolve on the fast path and do not call a research or reasoning provider. Action steps are proposals only; the Orchestrator has no direct process, service, shell, PowerShell, registry, file-write, network, or cloud executor.
+
+External research and reasoning are represented by provider protocols and Fake providers. Web evidence is untrusted, provider input is bounded/sanitized, and arbitrary shell or download-and-execute plans are rejected by local policy. The `ModelRouter` selects Local/Luna/Terra/Sol heuristically: Local first, Luna default external, Terra after an eligible failure, and Sol only for hard high-value cases within latency/cost budgets. Routing never changes confirmation or safety policy. `DeterministicReflection` remains authoritative for promotion; `LLMReflectionProvider` is an optional structured enrichment interface and cannot promote a Skill. Automated validation keeps real Web/OpenAI/Cloud calls at zero.
+
 ### Phase 3 - Global Brain MVP on Google Cloud
 
 - FastAPI on Cloud Run,
@@ -941,3 +947,4 @@ The canonical copy is `docs/WindowsPet_AI_Memory_Learning_Spec.md` in the `lazyl
 - **0.3 — 2026-08-08:** Added WindowsPet intelligence identity, Local-first Primary Brain, Luna/Terra/Sol cognitive-extension routing, local-PC-assisted intent inference, explicit Reflection pipeline, collective-intelligence privacy boundary, and Git-first documentation governance.
 - **0.4 — 2026-08-08:** Recorded the Phase 1 local deterministic launch routing and SQLite Skill store implementation boundary.
 - **0.5 — 2026-08-08:** Recorded the local Personal Memory Phase 2 and deterministic Reflection/Revalidation foundation boundaries.
+- **0.6 — 2026-08-08:** Recorded the local Research Orchestrator, Capability Registry, bounded Evidence/plan/re-plan flow, Local/Luna/Terra/Sol routing foundation, and optional structured LLM Reflection boundary. Real external providers remain unconnected.

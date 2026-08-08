@@ -56,6 +56,15 @@ class AuditEventType(str, Enum):
     ELEVATION_VERIFICATION_SUCCEEDED = "elevation_verification_succeeded"
     ELEVATION_VERIFICATION_FAILED = "elevation_verification_failed"
     ELEVATION_CLEANUP_FAILED = "elevation_cleanup_failed"
+    RESEARCH_STARTED = "research_started"
+    RESEARCH_STEP_STARTED = "research_step_started"
+    RESEARCH_EVIDENCE_ADDED = "research_evidence_added"
+    RESEARCH_PLAN_CREATED = "research_plan_created"
+    RESEARCH_WAITING_CONFIRMATION = "research_waiting_confirmation"
+    RESEARCH_REPLANNED = "research_replanned"
+    RESEARCH_SUCCEEDED = "research_succeeded"
+    RESEARCH_FAILED = "research_failed"
+    RESEARCH_CANCELLED = "research_cancelled"
 
 
 @dataclass(frozen=True)

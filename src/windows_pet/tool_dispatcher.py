@@ -12,6 +12,7 @@ from .powershell_read_models import WindowsInspectionArea, WindowsInspectionRequ
 from .process_stop_request import parse_process_stop_request
 from .service_restart_request import parse_service_restart_request
 
+
 class ToolDispatcher:
     """Validates model arguments locally before any filesystem access."""
     def __init__(self, settings: SearchSettings | None = None):
@@ -35,6 +36,21 @@ class ToolDispatcher:
     @staticmethod
     def parse_service_restart(arguments: str | dict):
         return parse_service_restart_request(arguments)
+
+    @staticmethod
+    def research_unknown(arguments: str | dict, orchestrator):
+        """Hand an unresolved request to the bounded local orchestrator.
+
+        This is an explicit application handoff, not a generic model tool: the
+        orchestrator still owns policy classification and the confirmation
+        boundary, and it never executes a provider-generated command.
+        """
+        from .research.models import ResearchGoal
+
+        data = json.loads(arguments) if isinstance(arguments, str) else arguments
+        if not isinstance(data, dict) or set(data) != {"request"} or not isinstance(data["request"], str):
+            raise ValueError("research_unknown の引数が不正です。")
+        return orchestrator.run(ResearchGoal.from_text(data["request"]))
 
     @staticmethod
     def parse_windows_inspection(arguments: str | dict) -> WindowsInspectionRequest:

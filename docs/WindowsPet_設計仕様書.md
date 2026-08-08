@@ -1,10 +1,10 @@
 # WindowsPet 設計仕様書
 
 **Subtitle:** PCに住み、ユーザーと共に考え、最強の情シスとして実作業で困りごとを解決するローカルAIパートナー\
-**Version:** 0.7.0\
+**Version:** 0.8.0\
 **Date:** 2026-08-08\
 **Audience:** ChatGPT / Codex / WindowsPet developers\
-**Status:** Phase 2 Personal Memory, deterministic Reflection/Revalidation foundation, Phase 3B, Phase 4A, Phase 4B, chat application launch, safe application discovery, and Local Intelligence Phase 1 are implemented with automated Fake/read-only validation. Real UAC, real Broker Restart-Service, and real administrative changes remain intentionally unexecuted.
+**Status:** Research Orchestrator, bounded Model Routing, optional LLM Reflection interface, Phase 2 Personal Memory, deterministic Reflection/Revalidation foundation, Phase 3B, Phase 4A, Phase 4B, chat application launch, safe application discovery, and Local Intelligence Phase 1 are implemented with automated Fake/read-only validation. Real UAC, real Broker Restart-Service, external research, and real administrative changes remain intentionally unexecuted.
 
 > **AIへの最重要指示:** WindowsPetを単なるデスクトップペット、ChatGPTクライアント、チャットUI、読み取り専用検索アプリとして扱わないこと。WindowsPetはローカルPCで「生きる」一貫した知性主体であり、ユーザーとは主従ではなくパートナーとして接する。普段は控えめでユーザーの意思と集中を尊重し、頼まれたときは最強の情シスとして、曖昧な困りごとの本質をPCの事実・会話・記憶から推定し、知らないことも自ら調査・推論・計画し、必要ならWebや外部AIを拡張頭脳として利用する。確認不要な調査は主体的に進め、確認が必要な副作用だけを適切な時点で提示し、承認された範囲を実行・検証する。作業後は内部的にReflectionを行い、経験を次回へ活かせる知識へ変換する。ユーザーから見える知性の主体は常にWindowsPetであり、外部AIモデルを別人格・上司・別の相談相手として見せない。
 
@@ -477,9 +477,12 @@ chat-serverは複数WindowsPetの**集合知（Global Brain / Shared Knowledge�
 - Personal Memoryの保存前に決定論的privacy filterを通し、secret、credential、raw conversation、screenshot、raw stdout/stderr、巨大内容を保存しない。cloud、HTTP、OpenAI upload、Global Brain送信は行わない。
 - Personal Memory inspection UIをcontext menu／tray menuへ追加。category filter、protected表示、個別削除を提供し、Local Skill DBとは別domain／別tableで管理する。
 - Reflection foundation: 構造化Experience、deterministic Reflection、provenance付きLearningCandidate、verified成功時だけのLocal Skill promotion、failure evidence保持、abstract targetのcurrent resolver再検証を実装済み。ReflectionはQt threadやnetworkを使用しない。
+- Research Orchestrator foundation: `src/windows_pet/research/` に immutable goal/session/state、code-owned Capability Registry、provenance付きEvidenceとtrust順位、bounded local investigation、CandidatePlan、Policy/confirmation boundary、Fake provider、failure evidenceとbounded re-plan、Reflection handoffを実装済み。Orchestrator自身は副作用Executorを持たず、実行は既存Action/Policy/Grant層へhandoffする。
+- Model Routing foundation: Local/Luna/Terra/Solを決定論的に選ぶ `ModelRouter` を実装済み。既知のローカル解決は外部providerを呼ばず、Lunaを既定、Terra/Solは品質改善・予算・難度の条件が揃った場合だけ候補にする。Routingはconfirmation要件を緩和しない。
+- LLM Reflection interface: `DeterministicReflection` と `LLMReflectionProvider`／optional enrichment境界を追加。外部providerへ渡すのはbounded structured contextのみで、LLM結果はSkill promotion権限を持たない。Fake providerでnetwork 0を検証済み。
 - Qt lifecycle hardening: 親付きQThreadの`finished`通知と参照解放の順序を維持し、親QObjectによる破棄責任へ統一。修正後に別プロセスstress harnessを追加し、normal 100／cancel 50／shutdown 50を3プロセス連続で検証済み。`QThread.terminate`は使用していない。
 
-Implementation baseline: current Git `main` through the Local Intelligence Phase 1 delivery.\
+Implementation baseline: current Git `main` through the Research Orchestrator and Model Routing delivery.\
 Validation baseline: Fake/read-only discovery and local-learning tests pass; full acceptance is recorded in the delivery report for the current commit.
 
 ### Current limitations
@@ -489,7 +492,7 @@ Validation baseline: Fake/read-only discovery and local-learning tests pass; ful
 - 実UAC、署名済みBroker、実管理者変更の手動確認は未実施。
 - UI／QThreadの製品フローを網羅する統合テストは不足している。
 - literal `DisplayIcon` と安全な `InstallLocation` から決定論的に候補化できない installed app は名前検索で見つからない場合がある。`UninstallString`/`QuietUninstallString` は意図的に利用しない。
-- Global Brain、chat-server sharing、Personal Memory cloud sync、cloud/global skill sharingは未実装。Local Skill DBは実行学習専用で会話全文を保存しない。Reflectionはdeterministic foundationまでで、LLM reflection／Research Orchestratorは未実装。
+- Global Brain、chat-server sharing、Personal Memory cloud sync、cloud/global skill sharingは未実装。Local Skill DBは実行学習専用で会話全文を保存しない。Research providerはFake/Protocol境界までで、実Web／実OpenAI reflectionは未接続。
 - File server、Teams connector、UI automation、自由形式のPowerShell Tool群は未実装。
 
 ## 16. Roadmap
@@ -497,13 +500,13 @@ Validation baseline: Fake/read-only discovery and local-learning tests pass; ful
 1. 本番AuditSink接続、Grant consume/reject監査、UI/QThread統合テスト（基礎実装・Fake検証済み、製品全体の網羅は継続）。
 2. チャットのアプリ起動要求、フルパス、Start Menu shortcut、installed app metadata探索（実装済み。実環境の手動確認は未実施）。
 3. Local Intelligence Runtime Phase 1（deterministic routing、Local Skill DB、alias、success/failure、last-used、memory strength、known launch reuse）を実装済み。次はPersonal MemoryとReflection。
-5. Research Orchestrator：未知タスク分解、ローカル調査、公式Web／一般Web検索、根拠管理、re-plan loop。
+5. Research Orchestrator foundation（実装済み）：未知タスクのbounded local investigation、根拠管理、CandidatePlan、confirmation boundary、failure re-plan、Reflection handoff。実Web接続は継続課題。
 6. PowerShellExecutionProposal、Policy、確認画面、Executor、verification、auditの実装。
 7. 署名済みBrokerと実UAC／実Restart-Serviceの手動確認を、開発Fake経路と分離して実施する。
 8. 低リスクPowerShell Tool: process、service、network、event log、固定catalog registry read、winget name searchを実装済み。
 9. 変更系PowerShell Tool: service、startup、registry write、scheduled task、Windows settings、network/firewall/ACL。
-10. Reflection pipeline、local persistent memory、revalidation、Memory UI、API context compression、successful-procedure distillation。
-11. Luna→Terra→Solのlatency/cost/confidence aware model routingと評価基盤。
+10. Reflection pipeline、local persistent memory、revalidation、Memory UI、API context compression、successful-procedure distillation（foundation実装済み、LLM enrichmentはoptional境界のみ）。
+11. Luna→Terra→Solのlatency/cost/confidence aware model routingと評価基盤（決定論的foundation実装済み、実provider接続は継続課題）。
 12. File server、Teams connector。
 13. chat-server shared knowledge、access control、provenance、conflict resolution、複数ペットの集合知。
 14. capability discovery、UI Automation拡張、rollback、update distribution、diagnostics、performance/cost optimization。
@@ -590,3 +593,4 @@ ChatGPTプロジェクト共有ストレージには仕様書本体の複製を�
 - **0.5.0 — 2026-08-08:** Added bounded read-only winget package-name search with fixed source, non-interactive arguments, strict output parsing, timeout, and explicit exclusion of install/upgrade/uninstall/source mutation.
 - **0.6.0 — 2026-08-08:** Recorded chat application launch handoff, read-only Start Menu and installed-app discovery, and Local Intelligence Phase 1 implementation boundaries.
 - **0.7.0 — 2026-08-08:** Added the local Personal Memory Phase 2 foundation, inspection/deletion UI, deterministic privacy/retention boundaries, Reflection metadata, verified Skill promotion, and abstract-target revalidation boundaries.
+- **0.8.0 — 2026-08-08:** Added the local Research Orchestrator foundation, Capability Registry, Evidence provenance/trust, CandidatePlan and bounded state machine, confirmation/re-plan boundaries, Fake providers, deterministic Local/Luna/Terra/Sol routing, and optional structured LLM Reflection interface. Real Web/OpenAI/Cloud/UAC/admin operations remain unexecuted.
