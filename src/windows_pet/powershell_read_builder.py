@@ -43,6 +43,26 @@ def build_read_plan(request: WindowsInspectionRequest) -> PowerShellReadPlan:
 $items = @(Get-WinEvent -LogName $logName -MaxEvents $params.maxResults | ForEach-Object { [ordered]@{logName=$logName;eventId=[int]$_.Id;level=([string]$_.LevelDisplayName);provider=([string]$_.ProviderName);timeCreated=($(if ($null -eq $_.TimeCreated) { "" } else { $_.TimeCreated.ToUniversalTime().ToString("o") }));message=(([string]$_.Message).Substring(0, [math]::Min(2048, ([string]$_.Message).Length)))} })
 '''
         timeout = 15.0
+    elif request.area is WindowsInspectionArea.REGISTRY:
+        rows = r'''$catalog = [ordered]@{
+    app_paths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths", "HKLM:\Software\Microsoft\Windows\CurrentVersion\App Paths")
+    installed_apps = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall", "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall")
+}
+$catalogName = if ($null -eq $params.query) { "app_paths" } else { [string]$params.query }
+if (-not $catalog.Contains($catalogName)) { throw "unsupported_registry_catalog" }
+$items = @()
+foreach ($root in $catalog[$catalogName]) {
+    if ($items.Count -ge $params.maxResults) { break }
+    if (Test-Path -LiteralPath $root) {
+        foreach ($key in @(Get-ChildItem -LiteralPath $root -ErrorAction Stop)) {
+            if ($items.Count -ge $params.maxResults) { break }
+            $displayName = [string](Get-ItemPropertyValue -LiteralPath $key.PSPath -Name "DisplayName" -ErrorAction SilentlyContinue)
+            $items += [ordered]@{catalog=$catalogName;path=$key.PSPath.Substring(($key.PSPath.IndexOf("::") + 2));valueName="DisplayName";value=$displayName.Substring(0, [math]::Min(512, $displayName.Length))}
+        }
+    }
+}
+'''
+        timeout = 15.0
     else:
         rows = '''$items = @(Get-NetIPConfiguration | Sort-Object InterfaceAlias | Select-Object -First $params.maxResults | ForEach-Object { [ordered]@{interfaceAlias=$_.InterfaceAlias;status=$_.NetAdapter.Status.ToString();ipv4Addresses=@($_.IPv4Address | ForEach-Object { [ordered]@{address=$_.IPAddress;prefixLength=[int]$_.PrefixLength} });defaultGateway=(Get-NullableGateway $_.IPv4DefaultGateway)} })
 '''

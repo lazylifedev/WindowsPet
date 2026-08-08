@@ -36,6 +36,13 @@ def validate_result(value: object, request_area: WindowsInspectionArea, max_resu
                     or len(item["level"]) > 128 or len(item["provider"]) > 256
                     or len(item["timeCreated"]) > 64 or len(item["message"]) > 2048):
                 raise ResultValidationError("invalid_event_log")
+        elif request_area is WindowsInspectionArea.REGISTRY:
+            keys = {"catalog", "path", "valueName", "value"}
+            if (set(item) != keys or item["catalog"] not in {"app_paths", "installed_apps"}
+                    or not all(isinstance(item[key], str) for key in keys)
+                    or not item["path"] or len(item["path"]) > 1024
+                    or len(item["valueName"]) > 256 or len(item["value"]) > 512):
+                raise ResultValidationError("invalid_registry")
         else:
             if set(item) != {"interfaceAlias", "status", "ipv4Addresses", "defaultGateway"} or not isinstance(item["interfaceAlias"], str) or not item["interfaceAlias"] or not isinstance(item["status"], str) or not isinstance(item["ipv4Addresses"], list) or (item["defaultGateway"] is not None and not isinstance(item["defaultGateway"], str)): raise ValueError("invalid_network")
             for address in item["ipv4Addresses"]:

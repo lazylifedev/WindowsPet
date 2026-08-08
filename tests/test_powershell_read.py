@@ -24,7 +24,8 @@ def test_tool_request_schema_and_parser_rejects_unsafe_values():
     parsed = ToolDispatcher.parse_windows_inspection({"area":"processes", "query":"note", "max_results":5})
     assert parsed.area is WindowsInspectionArea.PROCESSES
     assert ToolDispatcher.parse_windows_inspection({"area":"event_logs", "query":"System", "max_results":5}).area is WindowsInspectionArea.EVENT_LOGS
-    for invalid in ({"area":"network","query":"x","max_results":1}, {"area":"other","query":None,"max_results":1}, {"area":"services","query":"x\0","max_results":1}, {"area":"services","query":"x\r\ny","max_results":1}, {"area":"services","query":"x\ty","max_results":1}, {"area":"services","query":"x\u007fy","max_results":1}, {"area":"services","query":None,"max_results":101}):
+    assert ToolDispatcher.parse_windows_inspection({"area":"registry", "query":"app_paths", "max_results":5}).area is WindowsInspectionArea.REGISTRY
+    for invalid in ({"area":"network","query":"x","max_results":1}, {"area":"registry","query":"arbitrary_path","max_results":1}, {"area":"other","query":None,"max_results":1}, {"area":"services","query":"x\0","max_results":1}, {"area":"services","query":"x\r\ny","max_results":1}, {"area":"services","query":"x\ty","max_results":1}, {"area":"services","query":"x\u007fy","max_results":1}, {"area":"services","query":None,"max_results":101}):
         with pytest.raises(ValueError): ToolDispatcher.parse_windows_inspection(invalid)
 
 
@@ -32,7 +33,8 @@ def test_inspection_tool_schema_is_strict_and_exposed():
     tool = next(tool for tool in AIClient.__new__(AIClient)._tools() if tool["name"] == "inspect_windows")
     assert tool["strict"] is True and tool["parameters"]["additionalProperties"] is False
     assert tool["parameters"]["required"] == ["area", "query", "max_results"]
-    assert tool["parameters"]["properties"]["area"]["enum"][-1] == "event_logs"
+    assert tool["parameters"]["properties"]["area"]["enum"][-2:] == ["event_logs", "registry"]
+    assert "registry" in tool["parameters"]["properties"]["area"]["enum"]
 
 
 def test_fake_responses_send_process_stop_tool_and_preserve_single_definition():
@@ -96,6 +98,19 @@ def test_event_log_runner_accepts_fake_read_only_result(tmp_path):
     ).execute(request("event_logs", "Application", 5))
     assert outcome.status is PowerShellReadStatus.SUCCESS
     assert outcome.result["items"][0]["eventId"] == 1000
+
+
+def test_registry_inspection_is_fixed_catalog_and_strict():
+    plan = build_read_plan(request("registry", "app_paths", 5))
+    assert "Get-ItemPropertyValue" in plan.script and "$items.Count -ge $params.maxResults" in plan.script
+    assert "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths" in plan.script
+    value = {"schemaVersion": 1, "operation": "registry", "items": [{
+        "catalog": "app_paths", "path": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\demo",
+        "valueName": "", "value": "C:\\demo.exe",
+    }]}
+    assert validate_result(value, WindowsInspectionArea.REGISTRY, 1) == value
+    with pytest.raises(ResultValidationError, match="invalid_registry"):
+        validate_result({**value, "items": [{**value["items"][0], "catalog": "arbitrary"}]}, WindowsInspectionArea.REGISTRY, 1)
 
 
 class FakeProcess:

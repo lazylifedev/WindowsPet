@@ -16,7 +16,7 @@ from .powershell_read_result import ResultValidationError, validate_result
 
 class PowerShellReadRunner:
     """Runs only the locally-built, hash-verified inspection scripts."""
-    _LIMITS = {"processes": 10.0, "services": 15.0, "network": 15.0, "event_logs": 15.0}
+    _LIMITS = {"processes": 10.0, "services": 15.0, "network": 15.0, "event_logs": 15.0, "registry": 15.0}
 
     def __init__(self, plan_factory=build_read_plan, windows_directory_resolver=None,
                  process_factory=subprocess.Popen, clock=time.monotonic, sleeper=time.sleep, audit=None):
