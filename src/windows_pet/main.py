@@ -11,7 +11,9 @@ from .character_package_loader import load_character_with_fallback
 from .character_models import CharacterPackage
 from .character_selection import CharacterSelection, resolve_selection, save_selection
 from .chat_bubble import InputBubble, chat_position, response_position
-from .paths import application_root, assets_root, character_data_root, character_installed_root, character_selection_path, character_working_root
+from .paths import (assets_root, character_data_root, character_installed_root,
+                    character_selection_path, character_working_root,
+                    runtime_data_root)
 from .character_editor_window import CharacterEditorWindow
 from .storage import constrain_to_primary, load_position, save_position
 from .file_search_settings_window import FileSearchSettingsWindow
@@ -411,10 +413,10 @@ class PetWindow(QWidget):
 
 
 def main() -> int:
-    root = application_root(); (root / "logs").mkdir(exist_ok=True); logging.basicConfig(filename=root / "logs" / "windows_pet.log", level=logging.INFO, encoding="utf-8")
-    logging.info("startup diagnostics frozen=%s manifest_present=%s", getattr(sys, "frozen", False), (assets_root() / "manifest.json").is_file())
     app = QApplication(sys.argv)
     configure_application(app)
+    root = runtime_data_root(); (root / "logs").mkdir(parents=True, exist_ok=True); logging.basicConfig(filename=root / "logs" / "windows_pet.log", level=logging.INFO, encoding="utf-8")
+    logging.info("startup diagnostics frozen=%s manifest_present=%s", getattr(sys, "frozen", False), (assets_root() / "manifest.json").is_file())
     try:
         data_root = character_data_root()
         package, selection, fallback = resolve_selection(character_selection_path(data_root), character_working_root(data_root), character_installed_root(data_root), assets_root())

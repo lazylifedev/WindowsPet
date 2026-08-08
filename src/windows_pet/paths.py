@@ -19,6 +19,14 @@ def application_root() -> Path:
         return resource_path("")
     return PROJECT_ROOT
 
+
+def runtime_data_root() -> Path:
+    """Return a persistent writable root for frozen runtime diagnostics."""
+    if not getattr(sys, "frozen", False):
+        return application_root()
+    location = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+    return Path(location) if location else application_root()
+
 def assets_root() -> Path:
     return resource_path("assets/animations")
 

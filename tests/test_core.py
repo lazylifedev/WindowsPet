@@ -5,7 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import QPoint, QRect, QObject, Signal
 from windows_pet.storage import constrain_to_primary, load_position, save_position
 from windows_pet.animation import load_animations
-from windows_pet.paths import resource_path
+from windows_pet.paths import resource_path, runtime_data_root
 from windows_pet.chat_bubble import ChatBubble, chat_position
 
 ROOT = Path(__file__).parents[1]
@@ -41,6 +41,16 @@ def test_resource_path_requires_meipass(monkeypatch):
     monkeypatch.delattr(sys, '_MEIPASS', raising=False)
     with pytest.raises(RuntimeError, match='sys._MEIPASS'):
         resource_path('assets/animations/manifest.json')
+
+
+def test_frozen_runtime_diagnostics_use_writable_app_local_data(monkeypatch, tmp_path):
+    import windows_pet.paths as paths
+
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(paths.QStandardPaths, 'writableLocation', staticmethod(lambda _location: str(tmp_path)))
+    assert runtime_data_root() == tmp_path
+
+
 def test_missing_asset_error(tmp_path, qapp):
     (tmp_path / 'manifest.json').write_text(json.dumps({'animations': {}}))
     with pytest.raises(RuntimeError, match='invalid_manifest'):
